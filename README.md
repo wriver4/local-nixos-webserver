@@ -27,26 +27,64 @@ A complete NixOS configuration for hosting multiple PHP websites with nginx, PHP
 - **Database**: MariaDB with automatic database creation
 - **Management**: Enhanced PHP dashboard with virtual host management
 
-## 🚀 Installation
+## 🚀 Installation Options
 
-### 1. System Setup
+### Option 1: Fresh NixOS Installation
+
+For new NixOS systems or complete replacement of existing configuration:
+
 ```bash
 # Copy the configuration
 sudo cp configuration.nix /etc/nixos/configuration.nix
 
 # Rebuild NixOS system
 sudo nixos-rebuild switch
-```
 
-### 2. Enhanced Web Content Setup
-```bash
 # Run the enhanced setup script
 chmod +x enhanced-setup-script.sh
 sudo ./enhanced-setup-script.sh
 ```
 
-### 3. Access Your Enhanced Dashboard
-After setup, access the enhanced dashboard at: **http://dashboard.local**
+### Option 2: Existing NixOS Installation (Recommended)
+
+For existing NixOS systems where you want to add web server functionality without disrupting current configuration:
+
+```bash
+# Make the installation script executable
+chmod +x install-on-existing-nixos.sh
+
+# Run the installation script
+./install-on-existing-nixos.sh
+
+# After successful completion, rebuild the system
+sudo nixos-rebuild switch
+```
+
+#### What the Existing Installation Script Does:
+
+1. **🔍 Safety Checks**: Verifies NixOS system and sudo access
+2. **💾 Automatic Backup**: Creates timestamped backup of current configuration
+3. **🔍 Conflict Detection**: Analyzes existing config for potential conflicts
+4. **📦 Modular Integration**: Adds web server as separate module (`webserver.nix`)
+5. **🔧 Helper Scripts**: Installs management utilities
+6. **🌐 Content Setup**: Creates web directories and sample content
+7. **📥 phpMyAdmin**: Downloads and configures phpMyAdmin automatically
+8. **✅ Validation**: Tests configuration syntax before completion
+
+#### Recovery Options:
+
+If anything goes wrong, you can easily restore your original configuration:
+
+```bash
+# Navigate to backup directory (shown in script output)
+cd /etc/nixos/webserver-backups/[timestamp]
+
+# Run the restore script
+sudo ./restore.sh
+
+# Rebuild with original configuration
+sudo nixos-rebuild switch
+```
 
 ## 🎛️ Virtual Host Management Features
 
@@ -152,6 +190,7 @@ Each virtual host can have its own dedicated database, automatically created and
 
 /etc/nixos/
 ├── configuration.nix   # Main NixOS configuration
+├── webserver.nix       # Web server module (existing installs)
 ├── backups/           # Configuration backups
 └── templates/         # Virtual host templates
 
@@ -171,6 +210,11 @@ Each virtual host can have its own dedicated database, automatically created and
 
 ## 🐛 Troubleshooting
 
+### Installation Issues
+- **Permission errors**: Ensure you have sudo access
+- **Configuration conflicts**: Check backup directory for restore options
+- **Network issues**: Verify internet connection for phpMyAdmin download
+
 ### Virtual Host Issues
 - **Site not accessible**: Check if NixOS rebuild was completed
 - **Database connection errors**: Verify database was created successfully
@@ -182,7 +226,7 @@ Each virtual host can have its own dedicated database, automatically created and
 - **Protected site removal**: Core sites cannot be removed by design
 
 ### Recovery
-- **Configuration backups**: Located in `/etc/nixos/backups/`
+- **Configuration backups**: Located in `/etc/nixos/webserver-backups/`
 - **Database backups**: Use phpMyAdmin or mysqldump
 - **Site restoration**: Recreate through dashboard interface
 
@@ -217,6 +261,9 @@ Each virtual host can have its own dedicated database, automatically created and
 - ✅ SSL support configuration
 - ✅ Helper command utilities
 - ✅ Improved user interface
+- ✅ **Safe installation script for existing NixOS systems**
+- ✅ **Automatic backup and recovery system**
+- ✅ **Conflict detection and resolution**
 
 ## 🤝 Contributing
 
