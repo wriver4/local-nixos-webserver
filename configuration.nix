@@ -1,4 +1,4 @@
-# NixOS Configuration for Nginx with Virtual Domains and PHP-FPM
+# NixOS Configuration for Nginx with Virtual Domains and PHP-FPM (PHP 8.4)
 { config, pkgs, ... }:
 
 {
@@ -68,7 +68,7 @@
     '';
   };
 
-  # PHP-FPM configuration
+  # PHP-FPM configuration with PHP 8.4
   services.phpfpm = {
     pools.www = {
       user = "nginx";
@@ -84,7 +84,7 @@
         "pm.max_spare_servers" = 20;
         "pm.max_requests" = 500;
       };
-      phpPackage = pkgs.php82.buildEnv {
+      phpPackage = pkgs.php84.buildEnv {
         extensions = ({ enabled, all }: enabled ++ (with all; [
           mysqli
           pdo_mysql
@@ -95,12 +95,32 @@
           json
           session
           filter
+          openssl
+          fileinfo
+          intl
+          exif
         ]));
         extraConfig = ''
           memory_limit = 256M
           upload_max_filesize = 64M
           post_max_size = 64M
           max_execution_time = 300
+          max_input_vars = 3000
+          date.timezone = UTC
+          
+          ; PHP 8.4 optimizations
+          opcache.enable = 1
+          opcache.memory_consumption = 128
+          opcache.interned_strings_buffer = 8
+          opcache.max_accelerated_files = 4000
+          opcache.revalidate_freq = 2
+          opcache.fast_shutdown = 1
+          
+          ; Security settings
+          expose_php = Off
+          display_errors = Off
+          log_errors = On
+          error_log = /var/log/php_errors.log
         '';
       };
     };
@@ -125,11 +145,17 @@
       tcp_nodelay on;
       keepalive_timeout 65;
       types_hash_max_size 2048;
+      client_max_body_size 64M;
       
       gzip on;
       gzip_vary on;
       gzip_min_length 1024;
       gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+      
+      # Security headers
+      add_header X-Frame-Options DENY;
+      add_header X-Content-Type-Options nosniff;
+      add_header X-XSS-Protection "1; mode=block";
     '';
 
     virtualHosts = {
@@ -146,8 +172,13 @@
               fastcgi_pass unix:${config.services.phpfpm.pools.www.socket};
               fastcgi_index index.php;
               fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              fastcgi_param PHP_VALUE "auto_prepend_file=none";
+              fastcgi_read_timeout 300;
               include ${pkgs.nginx}/conf/fastcgi_params;
             '';
+          };
+          "~ /\\.ht" = {
+            extraConfig = "deny all;";
           };
         };
       };
@@ -165,8 +196,13 @@
               fastcgi_pass unix:${config.services.phpfpm.pools.www.socket};
               fastcgi_index index.php;
               fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              fastcgi_param PHP_VALUE "auto_prepend_file=none";
+              fastcgi_read_timeout 300;
               include ${pkgs.nginx}/conf/fastcgi_params;
             '';
+          };
+          "~ /\\.ht" = {
+            extraConfig = "deny all;";
           };
         };
       };
@@ -184,8 +220,13 @@
               fastcgi_pass unix:${config.services.phpfpm.pools.www.socket};
               fastcgi_index index.php;
               fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              fastcgi_param PHP_VALUE "auto_prepend_file=none";
+              fastcgi_read_timeout 300;
               include ${pkgs.nginx}/conf/fastcgi_params;
             '';
+          };
+          "~ /\\.ht" = {
+            extraConfig = "deny all;";
           };
         };
       };
@@ -203,8 +244,13 @@
               fastcgi_pass unix:${config.services.phpfpm.pools.www.socket};
               fastcgi_index index.php;
               fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              fastcgi_param PHP_VALUE "auto_prepend_file=none";
+              fastcgi_read_timeout 300;
               include ${pkgs.nginx}/conf/fastcgi_params;
             '';
+          };
+          "~ /\\.ht" = {
+            extraConfig = "deny all;";
           };
         };
       };
@@ -222,8 +268,13 @@
               fastcgi_pass unix:${config.services.phpfpm.pools.www.socket};
               fastcgi_index index.php;
               fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              fastcgi_param PHP_VALUE "auto_prepend_file=none";
+              fastcgi_read_timeout 300;
               include ${pkgs.nginx}/conf/fastcgi_params;
             '';
+          };
+          "~ /\\.ht" = {
+            extraConfig = "deny all;";
           };
         };
       };
@@ -242,6 +293,12 @@
     mkdir -p /var/www/{dashboard,phpmyadmin,sample1,sample2,sample3}
     chown -R nginx:nginx /var/www
     chmod -R 755 /var/www
+    
+    # Create PHP error log directory
+    mkdir -p /var/log
+    touch /var/log/php_errors.log
+    chown nginx:nginx /var/log/php_errors.log
+    chmod 644 /var/log/php_errors.log
   '';
 
   system.stateVersion = "23.11";
