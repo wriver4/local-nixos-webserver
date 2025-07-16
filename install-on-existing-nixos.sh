@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # NixOS Web Server Installation Script for Existing Systems (PHP 8.4)
-# This script safely integrates web server functionality into existing NixOS installations
+# Enhanced with recursive flake.nix and configuration.nix import analysis
 
 set -e  # Exit on any error
 
@@ -15,7 +15,14 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# Global arrays for tracking analysis
+declare -a PROCESSED_FILES=()
+declare -a FOUND_IMPORTS=()
+declare -a FLAKE_MODULES=()
+declare -a CONFIG_CONFLICTS=()
 
 # Logging function
 log() {
@@ -35,6 +42,10 @@ error() {
     exit 1
 }
 
+info() {
+    echo -e "${CYAN}ℹ️  $1${NC}"
+}
+
 # Check if running as root
 check_root() {
     if [[ $EUID -eq 0 ]]; then
@@ -52,11 +63,341 @@ check_nixos() {
         error "This script is designed for NixOS systems only."
     fi
     
-    if [[ ! -f "$NIXOS_CONFIG_DIR/configuration.nix" ]]; then
-        error "NixOS configuration file not found at $NIXOS_CONFIG_DIR/configuration.nix"
+    if [[ ! -d "$NIXOS_CONFIG_DIR" ]]; then
+        error "NixOS configuration directory not found at $NIXOS_CONFIG_DIR"
     fi
     
     success "NixOS system detected"
+}
+
+# Recursive flake.nix analysis
+analyze_flake_recursive() {
+    local flake_file="$1"
+    local depth="${2:-0}"
+    local indent=""
+    
+    # Create indentation for nested analysis
+    for ((i=0; i<depth; i++)); do
+        indent+="  "
+    done
+    
+    if [[ ! -f "$flake_file" ]]; then
+        return 1
+    fi
+    
+    # Check if already processed to prevent infinite loops
+    local abs_file=$(realpath "$flake_file" 2>/dev/null || echo "$flake_file")
+    for processed in "${PROCESSED_FILES[@]}"; do
+        if [[ "$processed" == "$abs_file" ]]; then
+            info "${indent}↻ $(basename "$flake_file") (already analyzed)"
+            return 0
+        fi
+    done
+    PROCESSED_FILES+=("$abs_file")
+    
+    log "${indent}📦 Analyzing flake: $(basename "$flake_file")"
+    
+    # Extract flake inputs and their potential local paths
+    local inputs_section=$(sed -n '/inputs = {/,/};/p' "$flake_file" 2>/dev/null)
+    if [[ -n "$inputs_section" ]]; then
+        echo "$inputs_section" | grep -E '^\s*[a-zA-Z][a-zA-Z0-9_-]*\s*=' | while IFS= read -r input_line; do
+            local input_name=$(echo "$input_line" | sed 's/^\s*//' | cut -d'=' -f1 | tr -d ' ')
+            info "${indent}  📥 Input: $input_name"
+            
+            # Check for local path inputs
+            if echo "$input_line" | grep -q "path:"; then
+                local local_path=$(echo "$input_line" | sed 's/.*path:\s*"\([^"]*\)".*/\1/')
+                local full_path="$(dirname "$flake_file")/$local_path"
+                if [[ -f "$full_path/flake.nix" ]]; then
+                    analyze_flake_recursive "$full_path/flake.nix" $((depth + 1))
+                fi
+            fi
+        done
+    fi
+    
+    # Extract nixosConfigurations and their modules
+    local nixos_configs=$(sed -n '/nixosConfigurations/,/};/p' "$flake_file" 2>/dev/null)
+    if [[ -n "$nixos_configs" ]]; then
+        info "${indent}🖥️  NixOS Configurations found"
+        
+        # Find modules in nixosConfigurations
+        echo "$nixos_configs" | grep -E 'modules\s*=\s*\[' -A 50 | grep -E '\./|\.nix|/' | while IFS= read -r module_line; do
+            local clean_module=$(echo "$module_line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/[";,]//g')
+            
+            if [[ "$clean_module" =~ ^\./.*\.nix$ ]]; then
+                local module_file="$(dirname "$flake_file")/$clean_module"
+                info "${indent}    📋 Module: $clean_module"
+                FLAKE_MODULES+=("$module_file")
+                
+                # Recursively analyze configuration modules
+                if [[ -f "$module_file" ]]; then
+                    analyze_configuration_recursive "$module_file" $((depth + 1))
+                fi
+            elif [[ "$clean_module" =~ ^/.*\.nix$ ]]; then
+                info "${indent}    📋 Absolute module: $clean_module"
+                FLAKE_MODULES+=("$clean_module")
+                if [[ -f "$clean_module" ]]; then
+                    analyze_configuration_recursive "$clean_module" $((depth + 1))
+                fi
+            fi
+        done
+    fi
+    
+    return 0
+}
+
+# Recursive configuration.nix analysis
+analyze_configuration_recursive() {
+    local config_file="$1"
+    local depth="${2:-0}"
+    local indent=""
+    
+    # Create indentation for nested analysis
+    for ((i=0; i<depth; i++)); do
+        indent+="  "
+    done
+    
+    if [[ ! -f "$config_file" ]]; then
+        warning "${indent}📄 $(basename "$config_file") - File not found"
+        return 1
+    fi
+    
+    # Check if already processed to prevent infinite loops
+    local abs_file=$(realpath "$config_file" 2>/dev/null || echo "$config_file")
+    for processed in "${PROCESSED_FILES[@]}"; do
+        if [[ "$processed" == "$abs_file" ]]; then
+            info "${indent}↻ $(basename "$config_file") (already analyzed)"
+            return 0
+        fi
+    done
+    PROCESSED_FILES+=("$abs_file")
+    
+    log "${indent}📄 Analyzing config: $(basename "$config_file")"
+    
+    # Extract imports section
+    local imports_section=$(sed -n '/imports = \[/,/\];/p' "$config_file" 2>/dev/null)
+    
+    if [[ -z "$imports_section" ]]; then
+        info "${indent}  ℹ️  No imports section found"
+        return 0
+    fi
+    
+    # Parse individual imports recursively
+    echo "$imports_section" | grep -E '\./|\.nix|<|/' | while IFS= read -r import_line; do
+        local clean_import=$(echo "$import_line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/[";]//g')
+        
+        if [[ "$clean_import" =~ ^\./.*\.nix$ ]]; then
+            # Relative path import
+            local import_file="$(dirname "$config_file")/$clean_import"
+            info "${indent}  ├─ $clean_import"
+            FOUND_IMPORTS+=("$import_file")
+            analyze_configuration_recursive "$import_file" $((depth + 1))
+            
+        elif [[ "$clean_import" =~ ^/.*\.nix$ ]]; then
+            # Absolute path import
+            info "${indent}  ├─ $clean_import"
+            FOUND_IMPORTS+=("$clean_import")
+            analyze_configuration_recursive "$clean_import" $((depth + 1))
+            
+        elif [[ "$clean_import" =~ ^\<.*\>$ ]]; then
+            # Channel import
+            info "${indent}  ├─ $clean_import (channel import)"
+            
+        elif [[ -n "$clean_import" && "$clean_import" != "imports = [" && "$clean_import" != "];" ]]; then
+            info "${indent}  ├─ $clean_import"
+        fi
+    done
+    
+    # Check for web server configurations in this file
+    check_webserver_conflicts "$config_file" "$indent"
+}
+
+# Check for existing web server configurations
+check_webserver_conflicts() {
+    local file="$1"
+    local indent="$2"
+    
+    if grep -q "services\.nginx" "$file"; then
+        warning "${indent}  🌐 nginx configuration found"
+        CONFIG_CONFLICTS+=("nginx in $(basename "$file")")
+    fi
+    
+    if grep -q "services\.apache" "$file"; then
+        warning "${indent}  🌐 apache configuration found"
+        CONFIG_CONFLICTS+=("apache in $(basename "$file")")
+    fi
+    
+    if grep -q "services\.phpfpm" "$file"; then
+        warning "${indent}  🐘 PHP-FPM configuration found"
+        CONFIG_CONFLICTS+=("phpfpm in $(basename "$file")")
+    fi
+    
+    if grep -q "services\.mysql\|services\.mariadb" "$file"; then
+        warning "${indent}  🗄️  Database configuration found"
+        CONFIG_CONFLICTS+=("database in $(basename "$file")")
+    fi
+}
+
+# Comprehensive NixOS structure analysis
+analyze_nixos_structure() {
+    log "🔍 Starting comprehensive NixOS structure analysis..."
+    
+    # Reset global arrays
+    PROCESSED_FILES=()
+    FOUND_IMPORTS=()
+    FLAKE_MODULES=()
+    CONFIG_CONFLICTS=()
+    
+    local has_flake=false
+    local has_config=false
+    
+    # Check for flake.nix
+    if [[ -f "$NIXOS_CONFIG_DIR/flake.nix" ]]; then
+        has_flake=true
+        success "📦 Flake-based NixOS configuration detected"
+        echo
+        analyze_flake_recursive "$NIXOS_CONFIG_DIR/flake.nix"
+        echo
+    fi
+    
+    # Check for configuration.nix (can coexist with flakes)
+    if [[ -f "$NIXOS_CONFIG_DIR/configuration.nix" ]]; then
+        has_config=true
+        success "📄 Traditional configuration.nix found"
+        echo
+        analyze_configuration_recursive "$NIXOS_CONFIG_DIR/configuration.nix"
+        echo
+    fi
+    
+    # Additional .nix files analysis
+    log "🗺️  Scanning for additional .nix files..."
+    find "$NIXOS_CONFIG_DIR" -name "*.nix" -type f ! -name "flake.nix" ! -name "configuration.nix" 2>/dev/null | while read -r nix_file; do
+        local rel_path=$(realpath --relative-to="$NIXOS_CONFIG_DIR" "$nix_file")
+        
+        # Skip if already processed
+        local abs_file=$(realpath "$nix_file")
+        local already_processed=false
+        for processed in "${PROCESSED_FILES[@]}"; do
+            if [[ "$processed" == "$abs_file" ]]; then
+                already_processed=true
+                break
+            fi
+        done
+        
+        if [[ "$already_processed" == false ]]; then
+            info "📄 Additional file: $rel_path"
+            analyze_configuration_recursive "$nix_file" 1
+        fi
+    done
+    
+    # Summary
+    echo
+    log "📊 Analysis Summary:"
+    echo "==================="
+    
+    if [[ "$has_flake" == true ]]; then
+        success "Flake-based system detected"
+        info "Flake modules found: ${#FLAKE_MODULES[@]}"
+    fi
+    
+    if [[ "$has_config" == true ]]; then
+        success "Traditional configuration system detected"
+    fi
+    
+    info "Total imports analyzed: ${#FOUND_IMPORTS[@]}"
+    info "Configuration files processed: ${#PROCESSED_FILES[@]}"
+    
+    if [[ ${#CONFIG_CONFLICTS[@]} -gt 0 ]]; then
+        warning "Potential conflicts detected:"
+        for conflict in "${CONFIG_CONFLICTS[@]}"; do
+            echo "  • $conflict"
+        done
+    else
+        success "No web server conflicts detected"
+    fi
+    
+    echo
+}
+
+# Generate integration strategy based on analysis
+generate_integration_strategy() {
+    log "🛠️  Generating integration strategy..."
+    
+    local strategy_file="$BACKUP_DIR/integration-strategy.md"
+    sudo mkdir -p "$BACKUP_DIR"
+    
+    sudo tee "$strategy_file" > /dev/null << EOF
+# NixOS Web Server Integration Strategy
+
+## System Analysis Results
+- **Analysis Date**: $(date)
+- **Flake System**: $([ -f "$NIXOS_CONFIG_DIR/flake.nix" ] && echo "Yes" || echo "No")
+- **Traditional Config**: $([ -f "$NIXOS_CONFIG_DIR/configuration.nix" ] && echo "Yes" || echo "No")
+- **Files Processed**: ${#PROCESSED_FILES[@]}
+- **Imports Found**: ${#FOUND_IMPORTS[@]}
+- **Conflicts Detected**: ${#CONFIG_CONFLICTS[@]}
+
+## Integration Approach
+
+EOF
+
+    if [[ -f "$NIXOS_CONFIG_DIR/flake.nix" ]]; then
+        sudo tee -a "$strategy_file" > /dev/null << 'EOF'
+### Flake-based Integration
+1. Add webserver.nix to flake modules
+2. Update flake.nix nixosConfigurations
+3. Use `nixos-rebuild switch --flake .`
+
+```nix
+nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
+  modules = [
+    ./configuration.nix
+    ./webserver.nix  # Add this line
+  ];
+};
+```
+
+EOF
+    fi
+    
+    if [[ -f "$NIXOS_CONFIG_DIR/configuration.nix" ]]; then
+        sudo tee -a "$strategy_file" > /dev/null << 'EOF'
+### Traditional Configuration Integration
+1. Add ./webserver.nix to imports in configuration.nix
+2. Use `sudo nixos-rebuild switch`
+
+```nix
+imports = [
+  ./hardware-configuration.nix
+  ./webserver.nix  # Add this line
+];
+```
+
+EOF
+    fi
+    
+    if [[ ${#CONFIG_CONFLICTS[@]} -gt 0 ]]; then
+        sudo tee -a "$strategy_file" > /dev/null << EOF
+## Conflict Resolution Required
+
+The following conflicts were detected:
+EOF
+        for conflict in "${CONFIG_CONFLICTS[@]}"; do
+            echo "- $conflict" | sudo tee -a "$strategy_file" > /dev/null
+        done
+        
+        sudo tee -a "$strategy_file" > /dev/null << 'EOF'
+
+### Resolution Steps:
+1. Backup existing web server configurations
+2. Merge existing virtualHosts with new webserver module
+3. Resolve port conflicts
+4. Test with dry-build before applying
+
+EOF
+    fi
+    
+    success "Integration strategy saved to: $strategy_file"
 }
 
 # Check NixOS channel version
@@ -111,33 +452,15 @@ EOF
     success "Configuration backed up to: $BACKUP_DIR"
 }
 
-# Analyze existing configuration
+# Analyze existing configuration with enhanced recursive analysis
 analyze_existing_config() {
-    log "Analyzing existing NixOS configuration..."
+    log "Analyzing existing NixOS configuration with recursive import following..."
     
-    local config_file="$NIXOS_CONFIG_DIR/configuration.nix"
-    local conflicts=()
+    analyze_nixos_structure
     
-    # Check for existing web server configurations
-    if grep -q "services\.nginx" "$config_file"; then
-        conflicts+=("nginx")
-    fi
-    
-    if grep -q "services\.apache" "$config_file"; then
-        conflicts+=("apache")
-    fi
-    
-    if grep -q "services\.phpfpm" "$config_file"; then
-        conflicts+=("php-fpm")
-    fi
-    
-    if grep -q "services\.mysql\|services\.mariadb\|services\.postgresql" "$config_file"; then
-        conflicts+=("database")
-    fi
-    
-    if [[ ${#conflicts[@]} -gt 0 ]]; then
+    if [[ ${#CONFIG_CONFLICTS[@]} -gt 0 ]]; then
         warning "Potential conflicts detected with existing services:"
-        for conflict in "${conflicts[@]}"; do
+        for conflict in "${CONFIG_CONFLICTS[@]}"; do
             echo "  - $conflict"
         done
         echo
@@ -149,6 +472,7 @@ analyze_existing_config() {
     fi
     
     success "Configuration analysis complete"
+    generate_integration_strategy
 }
 
 # Generate web server configuration module with PHP 8.4
@@ -158,6 +482,7 @@ generate_webserver_module() {
     sudo tee "$NIXOS_CONFIG_DIR/webserver.nix" > /dev/null << 'EOF'
 # Web Server Configuration Module with PHP 8.4
 # Generated by NixOS Web Server Installation Script
+# Compatible with both flake and traditional NixOS configurations
 
 { config, pkgs, ... }:
 
@@ -435,16 +760,58 @@ EOF
     success "Web server module with PHP 8.4 created at $NIXOS_CONFIG_DIR/webserver.nix"
 }
 
-# Update main configuration to import web server module
+# Update main configuration based on detected structure
 update_main_configuration() {
-    log "Updating main NixOS configuration..."
+    log "Updating main NixOS configuration based on detected structure..."
+    
+    if [[ -f "$NIXOS_CONFIG_DIR/flake.nix" ]]; then
+        update_flake_configuration
+    fi
+    
+    if [[ -f "$NIXOS_CONFIG_DIR/configuration.nix" ]]; then
+        update_traditional_configuration
+    fi
+}
+
+# Update flake.nix configuration
+update_flake_configuration() {
+    log "Updating flake.nix configuration..."
+    
+    local flake_file="$NIXOS_CONFIG_DIR/flake.nix"
+    local temp_file=$(mktemp)
+    
+    # Check if webserver.nix is already in modules
+    if grep -q "webserver.nix" "$flake_file"; then
+        warning "Web server module already referenced in flake.nix"
+        return 0
+    fi
+    
+    # Add webserver.nix to modules in nixosConfigurations
+    awk '
+    /modules = \[/ {
+        print $0
+        print "        ./webserver.nix"
+        next
+    }
+    { print }
+    ' "$flake_file" > "$temp_file"
+    
+    sudo cp "$temp_file" "$flake_file"
+    rm "$temp_file"
+    
+    success "Flake configuration updated to include web server module"
+}
+
+# Update traditional configuration.nix
+update_traditional_configuration() {
+    log "Updating traditional configuration.nix..."
     
     local config_file="$NIXOS_CONFIG_DIR/configuration.nix"
     local temp_file=$(mktemp)
     
     # Check if webserver.nix is already imported
     if grep -q "webserver.nix" "$config_file"; then
-        warning "Web server module already imported in configuration"
+        warning "Web server module already imported in configuration.nix"
         return 0
     fi
     
@@ -477,7 +844,7 @@ update_main_configuration() {
     sudo cp "$temp_file" "$config_file"
     rm "$temp_file"
     
-    success "Main configuration updated to import web server module"
+    success "Traditional configuration updated to import web server module"
 }
 
 # Setup web directories and content
@@ -588,18 +955,25 @@ EOF
 create_helper_scripts() {
     log "Creating helper scripts with PHP 8.4 support..."
     
+    # Determine rebuild command based on system type
+    local rebuild_cmd="sudo nixos-rebuild switch"
+    if [[ -f "$NIXOS_CONFIG_DIR/flake.nix" ]]; then
+        rebuild_cmd="sudo nixos-rebuild switch --flake ."
+    fi
+    
     # Rebuild script
-    sudo tee /usr/local/bin/rebuild-webserver > /dev/null << 'EOF'
+    sudo tee /usr/local/bin/rebuild-webserver > /dev/null << EOF
 #!/bin/bash
 echo "🔄 Rebuilding NixOS configuration with PHP 8.4..."
-sudo nixos-rebuild switch
-if [ $? -eq 0 ]; then
+cd /etc/nixos
+$rebuild_cmd
+if [ \$? -eq 0 ]; then
     echo "✅ NixOS rebuild successful!"
     echo "🌐 Restarting web services..."
     sudo systemctl restart nginx
     sudo systemctl restart phpfpm
     echo "✅ Web services restarted!"
-    echo "🚀 PHP Version: $(php --version | head -1)"
+    echo "🚀 PHP Version: \$(php --version | head -1)"
 else
     echo "❌ NixOS rebuild failed!"
     exit 1
@@ -705,7 +1079,13 @@ EOF
 test_configuration() {
     log "Testing NixOS configuration syntax..."
     
-    if sudo nixos-rebuild dry-build &>/dev/null; then
+    local test_cmd="sudo nixos-rebuild dry-build"
+    if [[ -f "$NIXOS_CONFIG_DIR/flake.nix" ]]; then
+        test_cmd="sudo nixos-rebuild dry-build --flake ."
+        cd "$NIXOS_CONFIG_DIR"
+    fi
+    
+    if $test_cmd &>/dev/null; then
         success "Configuration syntax is valid"
     else
         error "Configuration syntax error detected. Please check the configuration manually."
@@ -715,6 +1095,7 @@ test_configuration() {
 # Main installation function
 main() {
     echo "🚀 NixOS Web Server Installation for Existing Systems (PHP 8.4)"
+    echo "Enhanced with Recursive Import Analysis"
     echo "=============================================================="
     echo
     
@@ -723,12 +1104,15 @@ main() {
     check_nixos_channel
     
     echo "This script will:"
+    echo "  • Recursively analyze your existing NixOS configuration structure"
+    echo "  • Follow both flake.nix and configuration.nix import chains"
     echo "  • Create a backup of your current NixOS configuration"
     echo "  • Add web server functionality with PHP 8.4 as a separate module"
     echo "  • Set up nginx, PHP-FPM 8.4, and MariaDB"
     echo "  • Create sample websites and management dashboard"
     echo "  • Install phpMyAdmin with PHP 8.4 compatibility"
     echo "  • Configure PHP 8.4 optimizations and security settings"
+    echo "  • Generate integration strategy based on your system structure"
     echo
     
     read -p "Do you want to continue? (y/N): " -n 1 -r
@@ -751,7 +1135,11 @@ main() {
     success "Installation completed successfully with PHP 8.4!"
     echo
     echo "🎯 Next steps:"
-    echo "1. Run: sudo nixos-rebuild switch"
+    if [[ -f "$NIXOS_CONFIG_DIR/flake.nix" ]]; then
+        echo "1. Run: cd /etc/nixos && sudo nixos-rebuild switch --flake ."
+    else
+        echo "1. Run: sudo nixos-rebuild switch"
+    fi
     echo "2. Wait for the system to rebuild and restart services"
     echo "3. Access your sites:"
     echo "   • Dashboard: http://dashboard.local"
@@ -772,6 +1160,7 @@ main() {
     echo
     echo "📦 Backup location: $BACKUP_DIR"
     echo "   • Run $BACKUP_DIR/restore.sh to restore original configuration"
+    echo "   • Integration strategy: $BACKUP_DIR/integration-strategy.md"
     echo
     warning "Remember to change default database passwords in production!"
     echo

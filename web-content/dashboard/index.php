@@ -53,6 +53,231 @@ if (isset($pdo)) {
     }
 }
 
+// Function to check if domain is .local
+function isLocalDomain($domain) {
+    return substr($domain, -6) === '.local';
+}
+
+// Function to backup hosts file
+function backupHostsFile() {
+    $hosts_file = '/etc/hosts';
+    $backup_file = '/etc/hosts.backup.' . date('Y-m-d-H-i-s');
+    
+    if (file_exists($hosts_file)) {
+        if (copy($hosts_file, $backup_file)) {
+            return $backup_file;
+        }
+    }
+    return false;
+}
+
+// Function to add domain to hosts file
+function addToHostsFile($domain) {
+    if (!isLocalDomain($domain)) {
+        return ['success' => true, 'message' => 'Non-local domain, hosts file not modified'];
+    }
+    
+    $hosts_file = '/etc/hosts';
+    
+    // Check if entry already exists
+    if (file_exists($hosts_file)) {
+        $hosts_content = file_get_contents($hosts_file);
+        if (strpos($hosts_content, $domain) !== false) {
+            return ['success' => true, 'message' => 'Domain already exists in hosts file'];
+        }
+    }
+    
+    // Create backup
+    $backup_file = backupHostsFile();
+    if (!$backup_file) {
+        return ['success' => false, 'message' => 'Failed to create hosts file backup'];
+    }
+    
+    // Add entry to hosts file
+    $hosts_entry = "127.0.0.1 $domain\n";
+    
+    if (file_put_contents($hosts_file, $hosts_entry, FILE_APPEND | LOCK_EX) === false) {
+        return ['success' => false, 'message' => 'Failed to write to hosts file'];
+    }
+    
+    return [
+        'success' => true, 
+        'message' => "Added $domain to hosts file",
+        'backup' => $backup_file
+    ];
+}
+
+// Function to remove domain from hosts file
+function removeFromHostsFile($domain) {
+    if (!isLocalDomain($domain)) {
+        return ['success' => true, 'message' => 'Non-local domain, hosts file not modified'];
+    }
+    
+    $hosts_file = '/etc/hosts';
+    
+    if (!file_exists($hosts_file)) {
+        return ['success' => true, 'message' => 'Hosts file does not exist'];
+    }
+    
+    // Create backup
+    $backup_file = backupHostsFile();
+    if (!$backup_file) {
+        return ['success' => false, 'message' => 'Failed to create hosts file backup'];
+    }
+    
+    // Read current hosts file
+    $hosts_content = file_get_contents($hosts_file);
+    
+    // Remove the domain entry (handle various formats)
+    $patterns = [
+        "/^127\.0\.0\.1\s+$domain\s*$/m",
+        "/^127\.0\.0\.1\s+$domain\s*\n/m",
+        "/\n127\.0\.0\.1\s+$domain\s*$/m",
+        "/\n127\.0\.0\.1\s+$domain\s*\n/m"
+    ];
+    
+    $original_content = $hosts_content;
+    foreach ($patterns as $pattern) {
+        $hosts_content = preg_replace($pattern, '', $hosts_content);
+    }
+    
+    // Check if anything was actually removed
+    if ($hosts_content === $original_content) {
+        return ['success' => true, 'message' => 'Domain not found in hosts file'];
+    }
+    
+    // Write updated content back to hosts file
+    if (file_put_contents($hosts_file, $hosts_content, LOCK_EX) === false) {
+        return ['success' => false, 'message' => 'Failed to write updated hosts file'];
+    }
+    
+    return [
+        'success' => true, 
+        'message' => "Removed $domain from hosts file",
+        'backup' => $backup_file
+    ];
+}
+
+// Function to get current hosts file entries for .local domains
+function getLocalHostsEntries() {
+    $hosts_file = '/etc/hosts';
+    $local_entries = [];
+    
+    if (!file_exists($hosts_file)) {
+        return $local_entries;
+    }
+    
+    $hosts_content = file_get_contents($hosts_file);
+    $lines = explode("\n", $hosts_content);
+    
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if (empty($line) || $line[0] === '#') {
+            continue;
+        }
+        
+        if (preg_match('/^127\.0\.0\.1\s+(.+\.local)\s*$/', $line, $matches)) {
+            $local_entries[] = $matches[1];
+        }
+    }
+    
+    return $local_entries;
+}
+
+// Function to validate hosts file permissions
+function validateHostsPermissions() {
+    $hosts_file = '/etc/hosts';
+    
+    if (!file_exists($hosts_file)) {
+        return ['success' => false, 'message' => 'Hosts file does not exist'];
+    }
+    
+    if (!is_readable($hosts_file)) {
+        return ['success' => false, 'message' => 'Cannot read hosts file'];
+    }
+    
+    if (!is_writable($hosts_file)) {
+        return ['success' => false, 'message' => 'Cannot write to hosts file. Check permissions.'];
+    }
+    
+    return ['success' => true, 'message' => 'Hosts file is accessible'];
+}
+
+// Function to get OPcache status
+function getOPcacheStatus() {
+    if (!function_exists('opcache_get_status')) {
+        return ['enabled' => false];
+    }
+    
+    $status = opcache_get_status();
+    if (!$status) {
+        return ['enabled' => false];
+    }
+    
+    $stats = $status['opcache_statistics'];
+    $memory = $status['memory_usage'];
+    
+    $hits = $stats['hits'];
+    $misses = $stats['misses'];
+    $total = $hits + $misses;
+    $hit_rate = $total > 0 ? ($hits / $total) * 100 : 0;
+    
+    $used_memory = $memory['used_memory'];
+    $free_memory = $memory['free_memory'];
+    $wasted_memory = $memory['wasted_memory'];
+    $total_memory = $used_memory + $free_memory + $wasted_memory;
+    $memory_usage = $total_memory > 0 ? ($used_memory / $total_memory) * 100 : 0;
+    
+    return [
+        'enabled' => true,
+        'hit_rate' => $hit_rate,
+        'cached_scripts' => $stats['num_cached_scripts'],
+        'memory_usage' => $memory_usage,
+        'used_memory' => $used_memory,
+        'total_memory' => $total_memory
+    ];
+}
+
+// Function to get Redis status
+function getRedisStatus() {
+    if (!class_exists('Redis')) {
+        return ['available' => false, 'error' => 'Redis extension not installed'];
+    }
+    
+    try {
+        $redis = new Redis();
+        $redis->connect('127.0.0.1', 6379);
+        
+        $info = $redis->info();
+        
+        $hits = intval($info['keyspace_hits'] ?? 0);
+        $misses = intval($info['keyspace_misses'] ?? 0);
+        $total = $hits + $misses;
+        $hit_rate = $total > 0 ? ($hits / $total) * 100 : 0;
+        
+        // Count active databases
+        $active_dbs = 0;
+        for ($i = 0; $i < 16; $i++) {
+            $redis->select($i);
+            if ($redis->dbSize() > 0) {
+                $active_dbs++;
+            }
+        }
+        
+        return [
+            'available' => true,
+            'connected' => true,
+            'hit_rate' => $hit_rate,
+            'active_databases' => $active_dbs,
+            'used_memory' => $info['used_memory'] ?? 0,
+            'connected_clients' => $info['connected_clients'] ?? 0,
+            'version' => $info['redis_version'] ?? 'Unknown'
+        ];
+    } catch (Exception $e) {
+        return ['available' => true, 'connected' => false, 'error' => $e->getMessage()];
+    }
+}
+
 // Function to generate nginx virtual host configuration
 function generateNginxConfig($domain, $document_root = '/var/www', $ssl_enabled = false) {
     $config = "      # {$domain}\n";
@@ -75,6 +300,13 @@ function generateNginxConfig($domain, $document_root = '/var/www', $ssl_enabled 
     $config .= "              fastcgi_index index.php;\n";
     $config .= "              fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;\n";
     $config .= "              include \${pkgs.nginx}/conf/fastcgi_params;\n";
+    $config .= "              \n";
+    $config .= "              # FastCGI caching\n";
+    $config .= "              fastcgi_cache WORDPRESS;\n";
+    $config .= "              fastcgi_cache_valid 200 30m;\n";
+    $config .= "              fastcgi_cache_bypass \$skip_cache;\n";
+    $config .= "              fastcgi_no_cache \$skip_cache;\n";
+    $config .= "              add_header X-FastCGI-Cache \$upstream_cache_status;\n";
     $config .= "            '';\n";
     $config .= "          };\n";
     $config .= "        };\n";
@@ -183,10 +415,35 @@ if ($_POST) {
                             $message = 'Domain already exists';
                             $message_type = 'error';
                         } else {
+                            // Validate hosts file permissions for .local domains
+                            if (isLocalDomain($domain)) {
+                                $hosts_check = validateHostsPermissions();
+                                if (!$hosts_check['success']) {
+                                    $message = 'Hosts file error: ' . $hosts_check['message'];
+                                    $message_type = 'error';
+                                    break;
+                                }
+                            }
+                            
                             // Insert new site
                             $stmt = $pdo->prepare("INSERT INTO sites (name, domain, database_name, ssl_enabled) VALUES (?, ?, ?, ?)");
                             $stmt->execute([$name, $domain, $database_name ?: null, $ssl_enabled]);
                             $site_id = $pdo->lastInsertId();
+                            
+                            $hosts_result = null;
+                            $db_result = null;
+                            
+                            // Add to hosts file if .local domain
+                            if (isLocalDomain($domain)) {
+                                $hosts_result = addToHostsFile($domain);
+                                if (!$hosts_result['success']) {
+                                    // Rollback database insertion if hosts file update fails
+                                    $pdo->prepare("DELETE FROM sites WHERE id = ?")->execute([$site_id]);
+                                    $message = 'Failed to update hosts file: ' . $hosts_result['message'];
+                                    $message_type = 'error';
+                                    break;
+                                }
+                            }
                             
                             // Create database if specified
                             if (!empty($database_name)) {
@@ -210,15 +467,25 @@ if ($_POST) {
                                 exec("sudo chown -R nginx:nginx {$site_dir}");
                             }
                             
-                            // Add to /etc/hosts
-                            $hosts_entry = "127.0.0.1 {$domain}\n";
-                            file_put_contents('/etc/hosts', $hosts_entry, FILE_APPEND | LOCK_EX);
+                            // Log the addition with hosts file info
+                            $log_details = "New virtual host created: {$domain}";
+                            if ($hosts_result && $hosts_result['success']) {
+                                $log_details .= " | " . $hosts_result['message'];
+                                if (isset($hosts_result['backup'])) {
+                                    $log_details .= " | Backup: " . basename($hosts_result['backup']);
+                                }
+                            }
                             
-                            $log_stmt = $pdo->prepare("INSERT INTO logs (site_id, action, details) VALUES (?, 'Site added', 'New virtual host created: {$domain}')");
-                            $log_stmt->execute([$site_id]);
+                            $log_stmt = $pdo->prepare("INSERT INTO logs (site_id, action, details) VALUES (?, 'Site added', ?)");
+                            $log_stmt->execute([$site_id, $log_details]);
                             
                             if (empty($message)) {
-                                $message = 'Site added successfully! Remember to rebuild NixOS configuration.';
+                                $success_msg = 'Site added successfully!';
+                                if (isLocalDomain($domain)) {
+                                    $success_msg .= ' Domain added to hosts file.';
+                                }
+                                $success_msg .= ' Remember to rebuild NixOS configuration.';
+                                $message = $success_msg;
                                 $message_type = 'success';
                             }
                         }
@@ -246,21 +513,42 @@ if ($_POST) {
                             $message_type = 'error';
                         } else {
                             try {
+                                $hosts_result = null;
+                                
+                                // Remove from hosts file if .local domain
+                                if (isLocalDomain($site['domain'])) {
+                                    $hosts_result = removeFromHostsFile($site['domain']);
+                                    if (!$hosts_result['success']) {
+                                        $message = 'Warning: Failed to remove from hosts file: ' . $hosts_result['message'];
+                                        $message_type = 'warning';
+                                    }
+                                }
+                                
                                 // Remove from database
                                 $delete_stmt = $pdo->prepare("DELETE FROM sites WHERE id = ?");
                                 $delete_stmt->execute([$site_id]);
                                 
-                                // Log the removal
-                                $log_stmt = $pdo->prepare("INSERT INTO logs (site_id, action, details) VALUES (NULL, 'Site removed', 'Virtual host removed: {$site['domain']}')");
-                                $log_stmt->execute();
+                                // Log the removal with hosts file info
+                                $log_details = "Virtual host removed: {$site['domain']}";
+                                if ($hosts_result && $hosts_result['success']) {
+                                    $log_details .= " | " . $hosts_result['message'];
+                                    if (isset($hosts_result['backup'])) {
+                                        $log_details .= " | Backup: " . basename($hosts_result['backup']);
+                                    }
+                                }
                                 
-                                // Remove from /etc/hosts
-                                $hosts_content = file_get_contents('/etc/hosts');
-                                $hosts_content = preg_replace("/127\.0\.0\.1\s+{$site['domain']}\n?/", '', $hosts_content);
-                                file_put_contents('/etc/hosts', $hosts_content);
+                                $log_stmt = $pdo->prepare("INSERT INTO logs (site_id, action, details) VALUES (NULL, 'Site removed', ?)");
+                                $log_stmt->execute([$log_details]);
                                 
-                                $message = 'Site removed successfully! Remember to rebuild NixOS configuration and manually remove the directory if needed.';
-                                $message_type = 'success';
+                                if (empty($message)) {
+                                    $success_msg = 'Site removed successfully!';
+                                    if (isLocalDomain($site['domain'])) {
+                                        $success_msg .= ' Domain removed from hosts file.';
+                                    }
+                                    $success_msg .= ' Remember to rebuild NixOS configuration and manually remove the directory if needed.';
+                                    $message = $success_msg;
+                                    $message_type = 'success';
+                                }
                             } catch (Exception $e) {
                                 $message = 'Error removing site: ' . $e->getMessage();
                                 $message_type = 'error';
@@ -293,9 +581,29 @@ if ($_POST) {
 // Get sites data
 $sites = [];
 $logs = [];
+$hosts_entries = [];
 if (isset($pdo)) {
     $sites = $pdo->query("SELECT * FROM sites ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
     $logs = $pdo->query("SELECT l.*, s.name as site_name FROM logs l LEFT JOIN sites s ON l.site_id = s.id ORDER BY l.timestamp DESC LIMIT 15")->fetchAll(PDO::FETCH_ASSOC);
+    $hosts_entries = getLocalHostsEntries();
+}
+
+// Check hosts file permissions
+$hosts_permissions = validateHostsPermissions();
+
+// Get cache status
+$opcache_status = getOPcacheStatus();
+$redis_status = getRedisStatus();
+
+// Format bytes
+function formatBytes($bytes, $precision = 2) {
+    $units = array('B', 'KB', 'MB', 'GB', 'TB');
+    
+    for ($i = 0; $bytes > 1024; $i++) {
+        $bytes /= 1024;
+    }
+    
+    return round($bytes, $precision) . ' ' . $units[$i];
 }
 ?>
 
@@ -400,6 +708,25 @@ if (isset($pdo)) {
             border: 1px solid #f6e05e;
         }
         
+        .hosts-status {
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+        
+        .hosts-status.success {
+            background: #c6f6d5;
+            color: #22543d;
+            border: 1px solid #9ae6b4;
+        }
+        
+        .hosts-status.error {
+            background: #fed7d7;
+            color: #742a2a;
+            border: 1px solid #feb2b2;
+        }
+        
         .form-group {
             margin-bottom: 20px;
         }
@@ -433,6 +760,22 @@ if (isset($pdo)) {
         
         .checkbox-group input[type="checkbox"] {
             width: auto;
+        }
+        
+        .domain-hint {
+            font-size: 0.85rem;
+            color: #718096;
+            margin-top: 5px;
+        }
+        
+        .local-domain-info {
+            background: #e6fffa;
+            border: 1px solid #81e6d9;
+            color: #234e52;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            margin-top: 10px;
         }
         
         .status-badge {
@@ -476,6 +819,15 @@ if (isset($pdo)) {
         .site-info p {
             color: #718096;
             font-size: 0.9rem;
+        }
+        
+        .local-badge {
+            background: #bee3f8;
+            color: #2a69ac;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            margin-left: 8px;
         }
         
         .site-actions {
@@ -555,6 +907,10 @@ if (isset($pdo)) {
             transform: scale(1.05);
         }
         
+        .admin-link {
+            background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%);
+        }
+        
         .log-item {
             padding: 10px 15px;
             margin: 8px 0;
@@ -592,6 +948,72 @@ if (isset($pdo)) {
             color: #718096;
             font-size: 0.9rem;
             margin-top: 5px;
+        }
+        
+        .hosts-entries {
+            max-height: 200px;
+            overflow-y: auto;
+            background: #f7fafc;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        
+        .hosts-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid #e2e8f0;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        
+        .hosts-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .cache-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        
+        .status-enabled {
+            background: #48bb78;
+        }
+        
+        .status-disabled {
+            background: #f56565;
+        }
+        
+        .status-error {
+            background: #ed8936;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #48bb78, #38a169);
+            transition: width 0.3s ease;
+        }
+        
+        .cache-links {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
         }
         
         .modal {
@@ -645,7 +1067,10 @@ if (isset($pdo)) {
     <div class="container">
         <div class="header">
             <h1>🚀 Web Server Dashboard</h1>
-            <p>Manage your NixOS web server with nginx, PHP-FPM, MySQL and Virtual Host Management</p>
+            <p>Manage your NixOS web server with nginx, PHP-FPM, MySQL, OPcache, and Redis</p>
+            <p style="font-size: 0.9rem; margin-top: 10px; color: #4a5568;">
+                <strong>Performance Optimization:</strong> OPcache and Redis enabled for maximum performance
+            </p>
         </div>
         
         <?php if (!empty($message)): ?>
@@ -673,6 +1098,10 @@ if (isset($pdo)) {
                         <div class="stat-label">Active Sites</div>
                     </div>
                     <div class="stat-item">
+                        <div class="stat-number"><?php echo count($hosts_entries); ?></div>
+                        <div class="stat-label">Local Domains</div>
+                    </div>
+                    <div class="stat-item">
                         <div class="stat-number"><?php echo count($logs); ?></div>
                         <div class="stat-label">Recent Logs</div>
                     </div>
@@ -687,13 +1116,116 @@ if (isset($pdo)) {
             </div>
             
             <div class="card">
+                <h2>⚡ OPcache Status</h2>
+                
+                <div class="cache-status">
+                    <span class="status-indicator <?php echo $opcache_status['enabled'] ? 'status-enabled' : 'status-disabled'; ?>"></span>
+                    <span><?php echo $opcache_status['enabled'] ? 'Enabled' : 'Disabled'; ?></span>
+                </div>
+                
+                <?php if ($opcache_status['enabled']): ?>
+                    <div class="stats">
+                        <div class="stat-item">
+                            <div class="stat-number"><?php echo number_format($opcache_status['hit_rate'], 1); ?>%</div>
+                            <div class="stat-label">Hit Rate</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number"><?php echo number_format($opcache_status['cached_scripts']); ?></div>
+                            <div class="stat-label">Cached Scripts</div>
+                        </div>
+                    </div>
+                    
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: <?php echo $opcache_status['memory_usage']; ?>%"></div>
+                    </div>
+                    <p style="font-size: 0.9rem; color: #4a5568; text-align: center;">
+                        Memory: <?php echo formatBytes($opcache_status['used_memory']); ?> / <?php echo formatBytes($opcache_status['total_memory']); ?>
+                    </p>
+                <?php endif; ?>
+                
+                <div class="cache-links">
+                    <a href="/opcache-status.php?direct=1" class="btn btn-primary" target="_blank">
+                        📈 Detailed Status
+                    </a>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>🔴 Redis Status</h2>
+                
+                <div class="cache-status">
+                    <span class="status-indicator <?php echo $redis_status['available'] && $redis_status['connected'] ? 'status-enabled' : ($redis_status['available'] ? 'status-error' : 'status-disabled'); ?>"></span>
+                    <span>
+                        <?php 
+                        if (!$redis_status['available']) {
+                            echo 'Not Available';
+                        } elseif (!$redis_status['connected']) {
+                            echo 'Connection Error';
+                        } else {
+                            echo 'Connected';
+                        }
+                        ?>
+                    </span>
+                </div>
+                
+                <?php if ($redis_status['available'] && $redis_status['connected']): ?>
+                    <div class="stats">
+                        <div class="stat-item">
+                            <div class="stat-number"><?php echo number_format($redis_status['hit_rate'], 1); ?>%</div>
+                            <div class="stat-label">Hit Rate</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number"><?php echo $redis_status['active_databases']; ?></div>
+                            <div class="stat-label">Active DBs</div>
+                        </div>
+                    </div>
+                    
+                    <p style="font-size: 0.9rem; color: #4a5568; text-align: center;">
+                        Memory: <?php echo formatBytes($redis_status['used_memory']); ?> | 
+                        Clients: <?php echo $redis_status['connected_clients']; ?> | 
+                        Version: <?php echo $redis_status['version']; ?>
+                    </p>
+                <?php elseif (isset($redis_status['error'])): ?>
+                    <p style="color: #e53e3e; font-size: 0.9rem;"><?php echo htmlspecialchars($redis_status['error']); ?></p>
+                <?php endif; ?>
+                
+                <div class="cache-links">
+                    <a href="/redis-status.php?direct=1" class="btn btn-primary" target="_blank">
+                        📊 Manage Redis
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
                 <h2>🌐 Quick Links</h2>
                 <div class="quick-links">
                     <a href="http://phpmyadmin.local" class="quick-link" target="_blank">phpMyAdmin</a>
                     <a href="http://sample1.local" class="quick-link" target="_blank">Sample Site 1</a>
                     <a href="http://sample2.local" class="quick-link" target="_blank">Sample Site 2</a>
                     <a href="http://sample3.local" class="quick-link" target="_blank">Sample Site 3</a>
+                    <a href="/cache-management-scripts/" class="quick-link admin-link" target="_blank">🛠️ Cache Management Scripts</a>
                 </div>
+            </div>
+            
+            <div class="card">
+                <h2>📝 Hosts File Status</h2>
+                
+                <div class="hosts-status <?php echo $hosts_permissions['success'] ? 'success' : 'error'; ?>">
+                    <?php echo $hosts_permissions['message']; ?>
+                </div>
+                
+                <?php if (!empty($hosts_entries)): ?>
+                    <h3 style="margin-bottom: 10px; color: #2d3748;">Current .local domains:</h3>
+                    <div class="hosts-entries">
+                        <?php foreach ($hosts_entries as $entry): ?>
+                            <div class="hosts-entry">127.0.0.1 <?php echo htmlspecialchars($entry); ?></div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php else: ?>
+                    <p style="color: #718096; font-style: italic;">No .local domains found in hosts file</p>
+                <?php endif; ?>
             </div>
         </div>
         
@@ -710,7 +1242,11 @@ if (isset($pdo)) {
                     
                     <div class="form-group">
                         <label for="site_domain">Domain</label>
-                        <input type="text" id="site_domain" name="site_domain" required placeholder="mysite.local">
+                        <input type="text" id="site_domain" name="site_domain" required placeholder="mysite.local" onchange="checkLocalDomain(this.value)">
+                        <div class="domain-hint">Use .local for local development domains</div>
+                        <div id="local-domain-info" class="local-domain-info" style="display: none;">
+                            ℹ️ This .local domain will be automatically added to your hosts file (127.0.0.1)
+                        </div>
                     </div>
                     
                     <div class="form-group">
@@ -739,6 +1275,9 @@ if (isset($pdo)) {
                                 <?php if (in_array($site['domain'], ['dashboard.local', 'phpmyadmin.local'])): ?>
                                     <span class="protected-badge">PROTECTED</span>
                                 <?php endif; ?>
+                                <?php if (isLocalDomain($site['domain'])): ?>
+                                    <span class="local-badge">.local</span>
+                                <?php endif; ?>
                             </h3>
                             <p><?php echo htmlspecialchars($site['domain']); ?></p>
                             <?php if ($site['database_name']): ?>
@@ -759,7 +1298,7 @@ if (isset($pdo)) {
                             <a href="http://<?php echo $site['domain']; ?>" target="_blank" class="btn btn-primary">Visit</a>
                             
                             <?php if (!in_array($site['domain'], ['dashboard.local', 'phpmyadmin.local'])): ?>
-                                <button onclick="confirmRemove(<?php echo $site['id']; ?>, '<?php echo htmlspecialchars($site['name']); ?>')" class="btn btn-danger">Remove</button>
+                                <button onclick="confirmRemove(<?php echo $site['id']; ?>, '<?php echo htmlspecialchars($site['name']); ?>', '<?php echo htmlspecialchars($site['domain']); ?>')" class="btn btn-danger">Remove</button>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -788,6 +1327,9 @@ if (isset($pdo)) {
             <span class="close">&times;</span>
             <h2>⚠️ Confirm Removal</h2>
             <p>Are you sure you want to remove <strong id="siteName"></strong>?</p>
+            <p id="localDomainWarning" style="color: #e53e3e; margin-top: 10px; display: none;">
+                This .local domain will also be removed from your hosts file.
+            </p>
             <p style="color: #e53e3e; margin-top: 10px;">This action cannot be undone. The site directory and database will need to be manually removed.</p>
             
             <form method="post" style="margin-top: 20px;">
@@ -802,9 +1344,26 @@ if (isset($pdo)) {
     </div>
 
     <script>
-        function confirmRemove(siteId, siteName) {
+        function checkLocalDomain(domain) {
+            const info = document.getElementById('local-domain-info');
+            if (domain.endsWith('.local')) {
+                info.style.display = 'block';
+            } else {
+                info.style.display = 'none';
+            }
+        }
+        
+        function confirmRemove(siteId, siteName, domain) {
             document.getElementById('removeSiteId').value = siteId;
             document.getElementById('siteName').textContent = siteName;
+            
+            const localWarning = document.getElementById('localDomainWarning');
+            if (domain.endsWith('.local')) {
+                localWarning.style.display = 'block';
+            } else {
+                localWarning.style.display = 'none';
+            }
+            
             document.getElementById('removeModal').style.display = 'block';
         }
         
@@ -822,6 +1381,14 @@ if (isset($pdo)) {
         
         // Close modal with X button
         document.querySelector('.close').onclick = closeModal;
+        
+        // Auto-refresh cache status every 30 seconds
+        setInterval(function() {
+            // Only refresh if no modals are open
+            if (document.getElementById('removeModal').style.display !== 'block') {
+                location.reload();
+            }
+        }, 30000);
     </script>
 </body>
 </html>
