@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # NixOS Web Server Installation Script for Existing Systems (PHP 8.4)
 # This script safely integrates web server functionality into existing NixOS installations
@@ -99,7 +99,7 @@ backup_configuration() {
     
     # Create restore script
     sudo tee "$BACKUP_DIR/restore.sh" > /dev/null << EOF
-#!/usr/bin/env bash
+#!/bin/bash
 # Restore script created on $(date)
 echo "Restoring NixOS configuration from backup..."
 sudo cp -r "$BACKUP_DIR"/* "$NIXOS_CONFIG_DIR/"
@@ -590,7 +590,7 @@ create_helper_scripts() {
     
     # Rebuild script
     sudo tee /usr/local/bin/rebuild-webserver > /dev/null << 'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 echo "🔄 Rebuilding NixOS configuration with PHP 8.4..."
 sudo nixos-rebuild switch
 if [ $? -eq 0 ]; then
@@ -633,7 +633,7 @@ EOF
 
     # Site directory creation script with PHP 8.4 template
     sudo tee /usr/local/bin/create-site-dir > /dev/null << 'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 if [ $# -ne 2 ]; then
     echo "Usage: $0 <domain> <site_name>"
     exit 1

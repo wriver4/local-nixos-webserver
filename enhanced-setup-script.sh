@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # Enhanced NixOS Web Server Setup Script with Virtual Host Management (PHP 8.4)
 # This script sets up the complete web environment with management capabilities
@@ -70,7 +70,7 @@ sudo chown nginx:nginx /var/log/webserver-dashboard
 # Create helper script for NixOS rebuilds with PHP 8.4
 echo "🔧 Creating helper scripts..."
 sudo tee /usr/local/bin/rebuild-webserver << 'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 echo "🔄 Rebuilding NixOS configuration with PHP 8.4..."
 sudo nixos-rebuild switch
 if [ $? -eq 0 ]; then
@@ -121,7 +121,7 @@ EOF
 # Create database management helper
 echo "🗃️ Creating database management helper..."
 sudo tee /usr/local/bin/create-site-db << 'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 if [ $# -ne 1 ]; then
     echo "Usage: $0 <database_name>"
     exit 1
@@ -149,7 +149,7 @@ sudo chmod +x /usr/local/bin/create-site-db
 # Create site directory helper with PHP 8.4 template
 echo "📁 Creating site directory helper..."
 sudo tee /usr/local/bin/create-site-dir << 'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 if [ $# -ne 2 ]; then
     echo "Usage: $0 <domain> <site_name>"
     exit 1
