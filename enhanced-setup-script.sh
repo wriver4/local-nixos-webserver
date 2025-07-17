@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Enhanced NixOS Web Server Setup Script with Virtual Host Management (PHP 8.4)
 # This script sets up the complete web environment with management capabilities
@@ -30,14 +30,16 @@ sudo cp web-content/phpmyadmin/config.inc.php /var/www/phpmyadmin/
 
 # Set proper permissions
 echo "🔐 Setting permissions..."
-sudo chown -R nginx:nginx /var/www
+sudo chown -R nginx /var/www
+sudo chgrp -R nginx /var/www
 sudo chmod -R 755 /var/www
 
 # Create PHP error log
 echo "📝 Setting up PHP 8.4 error logging..."
 sudo mkdir -p /var/log
 sudo touch /var/log/php_errors.log
-sudo chown nginx:nginx /var/log/php_errors.log
+sudo chown nginx /var/log/php_errors.log
+sudo chgrp nginx /var/log/php_errors.log
 sudo chmod 644 /var/log/php_errors.log
 
 # Create phpMyAdmin configuration storage
@@ -56,7 +58,7 @@ sudo mkdir -p /etc/hosts-backups
 
 # Create hosts file management functions
 sudo tee /usr/local/bin/manage-hosts << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Hosts file management utility for .local domains
 # Usage: manage-hosts [add|remove|list|backup|restore] [domain]
@@ -178,12 +180,13 @@ sudo mkdir -p /etc/nixos/backups
 # Set up log rotation for virtual host management
 echo "📊 Setting up log management..."
 sudo mkdir -p /var/log/webserver-dashboard
-sudo chown nginx:nginx /var/log/webserver-dashboard
+sudo chown nginx /var/log/webserver-dashboard
+sudo chgrp nginx /var/log/webserver-dashboard
 
 # Create helper script for NixOS rebuilds with PHP 8.4
 echo "🔧 Creating helper scripts..."
 sudo tee /usr/local/bin/rebuild-webserver << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 echo "🔄 Rebuilding NixOS configuration with PHP 8.4..."
 sudo nixos-rebuild switch
 if [ $? -eq 0 ]; then
@@ -234,7 +237,7 @@ EOF
 # Create database management helper
 echo "🗃️ Creating database management helper..."
 sudo tee /usr/local/bin/create-site-db << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 if [ $# -ne 1 ]; then
     echo "Usage: $0 <database_name>"
     exit 1
@@ -262,7 +265,7 @@ sudo chmod +x /usr/local/bin/create-site-db
 # Enhanced site directory creation script with hosts file integration
 echo "📁 Creating enhanced site directory helper..."
 sudo tee /usr/local/bin/create-site-dir << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 if [ $# -ne 2 ]; then
     echo "Usage: $0 <domain> <site_name>"
     exit 1
@@ -298,7 +301,8 @@ if (version_compare(PHP_VERSION, '8.4.0', '>=')) {
 PHP
 
 # Set proper ownership
-chown -R nginx:nginx "$SITE_DIR"
+chown -R nginx "$SITE_DIR"
+chgrp -R nginx "$SITE_DIR"
 chmod -R 755 "$SITE_DIR"
 
 # Add to hosts file if .local domain
@@ -320,7 +324,7 @@ sudo chmod +x /usr/local/bin/create-site-dir
 # Create hosts file monitoring script
 echo "👁️ Creating hosts file monitoring script..."
 sudo tee /usr/local/bin/monitor-hosts << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Monitor hosts file for .local domain changes
 # This script can be used to track hosts file modifications

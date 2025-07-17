@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Enhanced NixOS Configuration Structure Analyzer
 # Recursively analyzes both flake.nix and configuration.nix import patterns

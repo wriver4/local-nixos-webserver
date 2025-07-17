@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # OPcache management utility
 # Usage: manage-opcache [status|reset|invalidate] [file]
