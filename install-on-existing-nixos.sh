@@ -2,31 +2,19 @@
 
 # NixOS Web Server Installation Script for Existing Systems (PHP 8.4)
 # This script safely integrates web server functionality into existing NixOS installations
-# Enhanced with dynamic path configuration
 
 set -e  # Exit on any error
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Default configuration paths (can be overridden)
-DEFAULT_NIXOS_CONFIG_DIR="/etc/nixos"
-DEFAULT_BACKUP_BASE_DIR="/etc/nixos/webserver-backups"
-DEFAULT_WEB_ROOT="/var/www"
-
-# Initialize with defaults
-NIXOS_CONFIG_DIR="$DEFAULT_NIXOS_CONFIG_DIR"
-BACKUP_BASE_DIR="$DEFAULT_BACKUP_BASE_DIR"
-WEB_ROOT="$DEFAULT_WEB_ROOT"
-
-# Dynamic backup directory with timestamp
-BACKUP_DIR=""
+NIXOS_CONFIG_DIR="/etc/nixos"
+BACKUP_DIR="/etc/nixos/webserver-backups/$(date +%Y%m%d-%H%M%S)"
+WEB_ROOT="/var/www"
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Logging function
@@ -47,279 +35,6 @@ error() {
     exit 1
 }
 
-info() {
-    echo -e "${CYAN}ℹ️  $1${NC}"
-}
-
-# Show usage information
-show_usage() {
-    cat << EOF
-Usage: $0 [OPTIONS]
-
-NixOS Web Server Installation Script for Existing Systems (PHP 8.4)
-Safely integrates web server functionality into existing NixOS installations.
-
-OPTIONS:
-    -c, --config-dir PATH       NixOS configuration directory
-                               Default: $DEFAULT_NIXOS_CONFIG_DIR
-    
-    -b, --backup-dir PATH       Backup base directory (timestamp will be added)
-                               Default: $DEFAULT_BACKUP_BASE_DIR
-    
-    -w, --webroot PATH          Web root directory for sites
-                               Default: $DEFAULT_WEB_ROOT
-    
-    -i, --interactive          Interactive mode (prompt for all paths)
-    
-    -h, --help                 Show this help message
-    
-    --dry-run                  Show what would be done without making changes
-
-EXAMPLES:
-    # Use defaults
-    $0
-    
-    # Custom paths
-    $0 --config-dir /home/user/nixos --webroot /srv/www
-    
-    # Interactive mode
-    $0 --interactive
-    
-    # Dry run to see what would happen
-    $0 --dry-run
-
-NOTES:
-    - All paths will be validated before use
-    - Directories will be created if they don't exist (with confirmation)
-    - Relative paths will be converted to absolute paths
-    - Backup directory will have timestamp appended automatically
-
-EOF
-}
-
-# Parse command line arguments
-parse_arguments() {
-    local interactive_mode=false
-    local dry_run=false
-    
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -c|--config-dir)
-                NIXOS_CONFIG_DIR="$2"
-                shift 2
-                ;;
-            -b|--backup-dir)
-                BACKUP_BASE_DIR="$2"
-                shift 2
-                ;;
-            -w|--webroot)
-                WEB_ROOT="$2"
-                shift 2
-                ;;
-            -i|--interactive)
-                interactive_mode=true
-                shift
-                ;;
-            --dry-run)
-                dry_run=true
-                shift
-                ;;
-            -h|--help)
-                show_usage
-                exit 0
-                ;;
-            *)
-                error "Unknown option: $1. Use --help for usage information."
-                ;;
-        esac
-    done
-    
-    # Handle interactive mode
-    if [[ "$interactive_mode" == true ]]; then
-        prompt_for_paths
-    fi
-    
-    # Handle dry run
-    if [[ "$dry_run" == true ]]; then
-        show_dry_run
-        exit 0
-    fi
-}
-
-# Interactive path configuration
-prompt_for_paths() {
-    echo "🔧 Interactive Path Configuration"
-    echo "================================="
-    echo
-    
-    # NixOS Config Directory
-    echo "📁 NixOS Configuration Directory"
-    echo "   Current default: $NIXOS_CONFIG_DIR"
-    read -p "   Enter new path (or press Enter to keep current): " input
-    if [[ -n "$input" ]]; then
-        NIXOS_CONFIG_DIR="$input"
-    fi
-    echo
-    
-    # Backup Directory
-    echo "💾 Backup Base Directory"
-    echo "   Current default: $BACKUP_BASE_DIR"
-    echo "   Note: Timestamp will be automatically appended"
-    read -p "   Enter new path (or press Enter to keep current): " input
-    if [[ -n "$input" ]]; then
-        BACKUP_BASE_DIR="$input"
-    fi
-    echo
-    
-    # Web Root Directory
-    echo "🌐 Web Root Directory"
-    echo "   Current default: $WEB_ROOT"
-    read -p "   Enter new path (or press Enter to keep current): " input
-    if [[ -n "$input" ]]; then
-        WEB_ROOT="$input"
-    fi
-    echo
-}
-
-# Show what would be done in dry run mode
-show_dry_run() {
-    echo "🔍 Dry Run Mode - Configuration Preview"
-    echo "======================================="
-    echo
-    
-    # Convert to absolute paths for display
-    local abs_config_dir=$(realpath -m "$NIXOS_CONFIG_DIR")
-    local abs_backup_base=$(realpath -m "$BACKUP_BASE_DIR")
-    local abs_webroot=$(realpath -m "$WEB_ROOT")
-    local abs_backup_dir="$abs_backup_base/$(date +%Y%m%d-%H%M%S)"
-    
-    echo "📋 Configuration Summary:"
-    echo "   NixOS Config Directory: $abs_config_dir"
-    echo "   Backup Directory: $abs_backup_dir"
-    echo "   Web Root Directory: $abs_webroot"
-    echo
-    
-    echo "📁 Files that would be created/modified:"
-    echo "   $abs_config_dir/webserver.nix (new web server module)"
-    echo "   $abs_config_dir/configuration.nix (updated to import webserver.nix)"
-    echo "   $abs_backup_dir/ (backup of current configuration)"
-    echo "   $abs_webroot/{dashboard,phpmyadmin,sample1,sample2,sample3}/ (web directories)"
-    echo "   /usr/local/bin/{rebuild-webserver,create-site-db,create-site-dir} (helper scripts)"
-    echo "   /etc/hosts (updated with .local domains)"
-    echo
-    
-    echo "🔍 Validation Results:"
-    validate_paths_dry_run "$abs_config_dir" "$abs_backup_base" "$abs_webroot"
-    echo
-    
-    echo "🚀 To run with these settings:"
-    echo "   $0 --config-dir \"$NIXOS_CONFIG_DIR\" --backup-dir \"$BACKUP_BASE_DIR\" --webroot \"$WEB_ROOT\""
-}
-
-# Validate paths in dry run mode
-validate_paths_dry_run() {
-    local config_dir="$1"
-    local backup_base="$2"
-    local webroot="$3"
-    
-    # Check NixOS config directory
-    if [[ -d "$config_dir" ]]; then
-        if [[ -f "$config_dir/configuration.nix" ]]; then
-            echo "   ✅ NixOS config directory exists with configuration.nix"
-        else
-            echo "   ⚠️  NixOS config directory exists but no configuration.nix found"
-        fi
-    else
-        echo "   ❌ NixOS config directory does not exist: $config_dir"
-    fi
-    
-    # Check backup directory parent
-    local backup_parent=$(dirname "$backup_base")
-    if [[ -d "$backup_parent" ]] || [[ "$backup_parent" == "/" ]]; then
-        echo "   ✅ Backup directory parent is accessible"
-    else
-        echo "   ⚠️  Backup directory parent may need to be created: $backup_parent"
-    fi
-    
-    # Check webroot parent
-    local webroot_parent=$(dirname "$webroot")
-    if [[ -d "$webroot_parent" ]] || [[ "$webroot_parent" == "/" ]]; then
-        echo "   ✅ Web root parent directory is accessible"
-    else
-        echo "   ⚠️  Web root parent may need to be created: $webroot_parent"
-    fi
-    
-    # Check permissions
-    if [[ -w "$config_dir" ]] || sudo -n test -w "$config_dir" 2>/dev/null; then
-        echo "   ✅ NixOS config directory is writable"
-    else
-        echo "   ⚠️  NixOS config directory may require sudo access"
-    fi
-}
-
-# Validate and normalize paths
-validate_and_normalize_paths() {
-    log "Validating and normalizing configuration paths..."
-    
-    # Convert to absolute paths
-    NIXOS_CONFIG_DIR=$(realpath -m "$NIXOS_CONFIG_DIR")
-    BACKUP_BASE_DIR=$(realpath -m "$BACKUP_BASE_DIR")
-    WEB_ROOT=$(realpath -m "$WEB_ROOT")
-    
-    # Set backup directory with timestamp
-    BACKUP_DIR="$BACKUP_BASE_DIR/$(date +%Y%m%d-%H%M%S)"
-    
-    info "Configuration paths:"
-    echo "   NixOS Config: $NIXOS_CONFIG_DIR"
-    echo "   Backup Dir: $BACKUP_DIR"
-    echo "   Web Root: $WEB_ROOT"
-    echo
-    
-    # Validate NixOS config directory
-    if [[ ! -d "$NIXOS_CONFIG_DIR" ]]; then
-        error "NixOS configuration directory does not exist: $NIXOS_CONFIG_DIR"
-    fi
-    
-    if [[ ! -f "$NIXOS_CONFIG_DIR/configuration.nix" ]]; then
-        error "NixOS configuration file not found: $NIXOS_CONFIG_DIR/configuration.nix"
-    fi
-    
-    # Check if we can write to config directory
-    if [[ ! -w "$NIXOS_CONFIG_DIR" ]] && ! sudo -n test -w "$NIXOS_CONFIG_DIR" 2>/dev/null; then
-        error "Cannot write to NixOS configuration directory: $NIXOS_CONFIG_DIR"
-    fi
-    
-    # Create backup base directory if it doesn't exist
-    local backup_parent=$(dirname "$BACKUP_BASE_DIR")
-    if [[ ! -d "$backup_parent" ]]; then
-        warning "Backup parent directory does not exist: $backup_parent"
-        read -p "Create backup parent directory? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            sudo mkdir -p "$backup_parent" || error "Failed to create backup parent directory"
-            success "Created backup parent directory: $backup_parent"
-        else
-            error "Cannot proceed without backup directory"
-        fi
-    fi
-    
-    # Create web root parent if it doesn't exist
-    local webroot_parent=$(dirname "$WEB_ROOT")
-    if [[ ! -d "$webroot_parent" ]]; then
-        warning "Web root parent directory does not exist: $webroot_parent"
-        read -p "Create web root parent directory? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            sudo mkdir -p "$webroot_parent" || error "Failed to create web root parent directory"
-            success "Created web root parent directory: $webroot_parent"
-        else
-            error "Cannot proceed without web root directory"
-        fi
-    fi
-    
-    success "Path validation completed successfully"
-}
-
 # Check if running as root
 check_root() {
     if [[ $EUID -eq 0 ]]; then
@@ -335,6 +50,10 @@ check_root() {
 check_nixos() {
     if [[ ! -f /etc/NIXOS ]]; then
         error "This script is designed for NixOS systems only."
+    fi
+    
+    if [[ ! -f "$NIXOS_CONFIG_DIR/configuration.nix" ]]; then
+        error "NixOS configuration file not found at $NIXOS_CONFIG_DIR/configuration.nix"
     fi
     
     success "NixOS system detected"
@@ -378,37 +97,18 @@ backup_configuration() {
     sudo mkdir -p "$BACKUP_DIR"
     sudo cp -r "$NIXOS_CONFIG_DIR"/* "$BACKUP_DIR/" 2>/dev/null || true
     
-    # Create restore script with dynamic paths
+    # Create restore script
     sudo tee "$BACKUP_DIR/restore.sh" > /dev/null << EOF
 #!/bin/bash
 # Restore script created on $(date)
-# Original paths: Config=$NIXOS_CONFIG_DIR, Backup=$BACKUP_DIR, WebRoot=$WEB_ROOT
-
-echo "🔄 Restoring NixOS configuration from backup..."
-echo "   Source: $BACKUP_DIR"
-echo "   Target: $NIXOS_CONFIG_DIR"
-echo
-
-read -p "Are you sure you want to restore? This will overwrite current configuration. (y/N): " -n 1 -r
-echo
-if [[ ! \$REPLY =~ ^[Yy]\$ ]]; then
-    echo "Restore cancelled."
-    exit 1
-fi
-
-echo "Restoring configuration files..."
+echo "Restoring NixOS configuration from backup..."
 sudo cp -r "$BACKUP_DIR"/* "$NIXOS_CONFIG_DIR/"
-sudo rm "$NIXOS_CONFIG_DIR/restore.sh" 2>/dev/null || true
-
-echo "✅ Configuration restored successfully!"
-echo "🔧 Run 'sudo nixos-rebuild switch' to apply the restored configuration."
-echo "🗑️  You may want to remove web directories if they were created:"
-echo "   sudo rm -rf $WEB_ROOT"
+sudo rm "$NIXOS_CONFIG_DIR/restore.sh"  # Remove this script
+echo "Configuration restored. Run 'sudo nixos-rebuild switch' to apply."
 EOF
     
     sudo chmod +x "$BACKUP_DIR/restore.sh"
     success "Configuration backed up to: $BACKUP_DIR"
-    info "Restore script available at: $BACKUP_DIR/restore.sh"
 }
 
 # Analyze existing configuration
@@ -455,10 +155,9 @@ analyze_existing_config() {
 generate_webserver_module() {
     log "Generating web server configuration module with PHP 8.4..."
     
-    sudo tee "$NIXOS_CONFIG_DIR/webserver.nix" > /dev/null << EOF
+    sudo tee "$NIXOS_CONFIG_DIR/webserver.nix" > /dev/null << 'EOF'
 # Web Server Configuration Module with PHP 8.4
 # Generated by NixOS Web Server Installation Script
-# Configuration paths: Config=$NIXOS_CONFIG_DIR, WebRoot=$WEB_ROOT
 
 { config, pkgs, ... }:
 
@@ -556,7 +255,7 @@ generate_webserver_module() {
     };
   };
 
-  # Nginx configuration with dynamic web root
+  # Nginx configuration
   services.nginx = {
     enable = true;
     user = "nginx";
@@ -591,20 +290,20 @@ generate_webserver_module() {
     virtualHosts = {
       # Dashboard
       "dashboard.local" = {
-        root = "$WEB_ROOT/dashboard";
+        root = "/var/www/dashboard";
         index = "index.php index.html";
         locations = {
           "/" = {
-            tryFiles = "\$uri \$uri/ /index.php?\$query_string";
+            tryFiles = "$uri $uri/ /index.php?$query_string";
           };
-          "~ \\.php\$" = {
+          "~ \\.php$" = {
             extraConfig = ''
-              fastcgi_pass unix:\${config.services.phpfpm.pools.www.socket};
+              fastcgi_pass unix:${config.services.phpfpm.pools.www.socket};
               fastcgi_index index.php;
-              fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
               fastcgi_param PHP_VALUE "auto_prepend_file=none";
               fastcgi_read_timeout 300;
-              include \${pkgs.nginx}/conf/fastcgi_params;
+              include ${pkgs.nginx}/conf/fastcgi_params;
             '';
           };
           "~ /\\.ht" = {
@@ -615,20 +314,20 @@ generate_webserver_module() {
 
       # phpMyAdmin
       "phpmyadmin.local" = {
-        root = "$WEB_ROOT/phpmyadmin";
+        root = "/var/www/phpmyadmin";
         index = "index.php";
         locations = {
           "/" = {
-            tryFiles = "\$uri \$uri/ /index.php?\$query_string";
+            tryFiles = "$uri $uri/ /index.php?$query_string";
           };
-          "~ \\.php\$" = {
+          "~ \\.php$" = {
             extraConfig = ''
-              fastcgi_pass unix:\${config.services.phpfpm.pools.www.socket};
+              fastcgi_pass unix:${config.services.phpfpm.pools.www.socket};
               fastcgi_index index.php;
-              fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
               fastcgi_param PHP_VALUE "auto_prepend_file=none";
               fastcgi_read_timeout 300;
-              include \${pkgs.nginx}/conf/fastcgi_params;
+              include ${pkgs.nginx}/conf/fastcgi_params;
             '';
           };
           "~ /\\.ht" = {
@@ -639,20 +338,20 @@ generate_webserver_module() {
 
       # Sample Domain 1
       "sample1.local" = {
-        root = "$WEB_ROOT/sample1";
+        root = "/var/www/sample1";
         index = "index.php index.html";
         locations = {
           "/" = {
-            tryFiles = "\$uri \$uri/ /index.php?\$query_string";
+            tryFiles = "$uri $uri/ /index.php?$query_string";
           };
-          "~ \\.php\$" = {
+          "~ \\.php$" = {
             extraConfig = ''
-              fastcgi_pass unix:\${config.services.phpfpm.pools.www.socket};
+              fastcgi_pass unix:${config.services.phpfpm.pools.www.socket};
               fastcgi_index index.php;
-              fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
               fastcgi_param PHP_VALUE "auto_prepend_file=none";
               fastcgi_read_timeout 300;
-              include \${pkgs.nginx}/conf/fastcgi_params;
+              include ${pkgs.nginx}/conf/fastcgi_params;
             '';
           };
           "~ /\\.ht" = {
@@ -663,20 +362,20 @@ generate_webserver_module() {
 
       # Sample Domain 2
       "sample2.local" = {
-        root = "$WEB_ROOT/sample2";
+        root = "/var/www/sample2";
         index = "index.php index.html";
         locations = {
           "/" = {
-            tryFiles = "\$uri \$uri/ /index.php?\$query_string";
+            tryFiles = "$uri $uri/ /index.php?$query_string";
           };
-          "~ \\.php\$" = {
+          "~ \\.php$" = {
             extraConfig = ''
-              fastcgi_pass unix:\${config.services.phpfpm.pools.www.socket};
+              fastcgi_pass unix:${config.services.phpfpm.pools.www.socket};
               fastcgi_index index.php;
-              fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
               fastcgi_param PHP_VALUE "auto_prepend_file=none";
               fastcgi_read_timeout 300;
-              include \${pkgs.nginx}/conf/fastcgi_params;
+              include ${pkgs.nginx}/conf/fastcgi_params;
             '';
           };
           "~ /\\.ht" = {
@@ -687,20 +386,20 @@ generate_webserver_module() {
 
       # Sample Domain 3
       "sample3.local" = {
-        root = "$WEB_ROOT/sample3";
+        root = "/var/www/sample3";
         index = "index.php index.html";
         locations = {
           "/" = {
-            tryFiles = "\$uri \$uri/ /index.php?\$query_string";
+            tryFiles = "$uri $uri/ /index.php?$query_string";
           };
-          "~ \\.php\$" = {
+          "~ \\.php$" = {
             extraConfig = ''
-              fastcgi_pass unix:\${config.services.phpfpm.pools.www.socket};
+              fastcgi_pass unix:${config.services.phpfpm.pools.www.socket};
               fastcgi_index index.php;
-              fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
               fastcgi_param PHP_VALUE "auto_prepend_file=none";
               fastcgi_read_timeout 300;
-              include \${pkgs.nginx}/conf/fastcgi_params;
+              include ${pkgs.nginx}/conf/fastcgi_params;
             '';
           };
           "~ /\\.ht" = {
@@ -719,10 +418,10 @@ generate_webserver_module() {
 
   # System activation script to create directories and files
   system.activationScripts.websetup = ''
-    # Create web directories with dynamic web root
-    mkdir -p $WEB_ROOT/{dashboard,phpmyadmin,sample1,sample2,sample3}
-    chown -R nginx:nginx $WEB_ROOT
-    chmod -R 755 $WEB_ROOT
+    # Create web directories
+    mkdir -p /var/www/{dashboard,phpmyadmin,sample1,sample2,sample3}
+    chown -R nginx:nginx /var/www
+    chmod -R 755 /var/www
     
     # Create PHP error log directory
     mkdir -p /var/log
@@ -734,7 +433,6 @@ generate_webserver_module() {
 EOF
 
     success "Web server module with PHP 8.4 created at $NIXOS_CONFIG_DIR/webserver.nix"
-    info "Web root configured as: $WEB_ROOT"
 }
 
 # Update main configuration to import web server module
@@ -807,7 +505,6 @@ echo "<h1>Welcome to $site.local</h1>";
 echo "<p>This is a placeholder page. Replace with your actual content.</p>";
 echo "<p>PHP Version: " . PHP_VERSION . "</p>";
 echo "<p>Server time: " . date('Y-m-d H:i:s') . "</p>";
-echo "<p>Web Root: $WEB_ROOT</p>";
 
 // Display PHP 8.4 features
 if (version_compare(PHP_VERSION, '8.4.0', '>=')) {
@@ -828,7 +525,7 @@ EOF
     sudo chown -R nginx:nginx "$WEB_ROOT"
     sudo chmod -R 755 "$WEB_ROOT"
     
-    success "Web directories and content set up at: $WEB_ROOT"
+    success "Web directories and content set up"
 }
 
 # Setup phpMyAdmin with PHP 8.4 compatibility
@@ -884,34 +581,25 @@ EOF
     cd "$SCRIPT_DIR"
     rm -rf "$temp_dir"
     
-    success "phpMyAdmin set up successfully with PHP 8.4 compatibility at: $phpmyadmin_dir"
+    success "phpMyAdmin set up successfully with PHP 8.4 compatibility"
 }
 
-# Create helper scripts with PHP 8.4 support and dynamic paths
+# Create helper scripts with PHP 8.4 support
 create_helper_scripts() {
-    log "Creating helper scripts with PHP 8.4 support and dynamic paths..."
+    log "Creating helper scripts with PHP 8.4 support..."
     
     # Rebuild script
-    sudo tee /usr/local/bin/rebuild-webserver > /dev/null << EOF
+    sudo tee /usr/local/bin/rebuild-webserver > /dev/null << 'EOF'
 #!/bin/bash
-# NixOS Web Server Rebuild Script
-# Configuration: $NIXOS_CONFIG_DIR
-# Web Root: $WEB_ROOT
-
 echo "🔄 Rebuilding NixOS configuration with PHP 8.4..."
-echo "   Config Dir: $NIXOS_CONFIG_DIR"
-echo "   Web Root: $WEB_ROOT"
-echo
-
-cd "$NIXOS_CONFIG_DIR"
 sudo nixos-rebuild switch
-if [ \$? -eq 0 ]; then
+if [ $? -eq 0 ]; then
     echo "✅ NixOS rebuild successful!"
     echo "🌐 Restarting web services..."
     sudo systemctl restart nginx
     sudo systemctl restart phpfpm
     echo "✅ Web services restarted!"
-    echo "🚀 PHP Version: \$(php --version | head -1)"
+    echo "🚀 PHP Version: $(php --version | head -1)"
 else
     echo "❌ NixOS rebuild failed!"
     exit 1
@@ -943,32 +631,27 @@ else
 fi
 EOF
 
-    # Site directory creation script with PHP 8.4 template and dynamic web root
-    sudo tee /usr/local/bin/create-site-dir > /dev/null << EOF
+    # Site directory creation script with PHP 8.4 template
+    sudo tee /usr/local/bin/create-site-dir > /dev/null << 'EOF'
 #!/bin/bash
-# Site Directory Creation Script
-# Web Root: $WEB_ROOT
-
-if [ \$# -ne 2 ]; then
-    echo "Usage: \$0 <domain> <site_name>"
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <domain> <site_name>"
     exit 1
 fi
 
-DOMAIN=\$1
-SITE_NAME=\$2
-SITE_DIR="$WEB_ROOT/\$DOMAIN"
+DOMAIN=$1
+SITE_NAME=$2
+SITE_DIR="/var/www/$DOMAIN"
 
-echo "Creating site directory: \$SITE_DIR"
-mkdir -p "\$SITE_DIR"
+echo "Creating site directory: $SITE_DIR"
+mkdir -p "$SITE_DIR"
 
-cat > "\$SITE_DIR/index.php" << PHP
+cat > "$SITE_DIR/index.php" << PHP
 <?php
-// \$SITE_NAME - PHP 8.4 Ready
-// Web Root: $WEB_ROOT
-echo '<h1>Welcome to \$SITE_NAME</h1>';
-echo '<p>This site is hosted on \$DOMAIN</p>';
+// $SITE_NAME - PHP 8.4 Ready
+echo '<h1>Welcome to $SITE_NAME</h1>';
+echo '<p>This site is hosted on $DOMAIN</p>';
 echo '<p>PHP Version: ' . PHP_VERSION . '</p>';
-echo '<p>Web Root: $WEB_ROOT</p>';
 echo '<p>Created: ' . date('Y-m-d H:i:s') . '</p>';
 
 if (version_compare(PHP_VERSION, '8.4.0', '>=')) {
@@ -983,17 +666,15 @@ if (version_compare(PHP_VERSION, '8.4.0', '>=')) {
 ?>
 PHP
 
-chown -R nginx:nginx "\$SITE_DIR"
-chmod -R 755 "\$SITE_DIR"
+chown -R nginx:nginx "$SITE_DIR"
+chmod -R 755 "$SITE_DIR"
 
 echo "✅ Site directory created successfully with PHP 8.4 template!"
-echo "📁 Location: \$SITE_DIR"
 EOF
 
     sudo chmod +x /usr/local/bin/{rebuild-webserver,create-site-db,create-site-dir}
     
-    success "Helper scripts created with PHP 8.4 support and dynamic paths"
-    info "Scripts configured for web root: $WEB_ROOT"
+    success "Helper scripts created with PHP 8.4 support"
 }
 
 # Update hosts file
@@ -1024,7 +705,6 @@ EOF
 test_configuration() {
     log "Testing NixOS configuration syntax..."
     
-    cd "$NIXOS_CONFIG_DIR"
     if sudo nixos-rebuild dry-build &>/dev/null; then
         success "Configuration syntax is valid"
     else
@@ -1032,15 +712,43 @@ test_configuration() {
     fi
 }
 
-# Show final summary
-show_final_summary() {
+# Main installation function
+main() {
+    echo "🚀 NixOS Web Server Installation for Existing Systems (PHP 8.4)"
+    echo "=============================================================="
+    echo
+    
+    check_root
+    check_nixos
+    check_nixos_channel
+    
+    echo "This script will:"
+    echo "  • Create a backup of your current NixOS configuration"
+    echo "  • Add web server functionality with PHP 8.4 as a separate module"
+    echo "  • Set up nginx, PHP-FPM 8.4, and MariaDB"
+    echo "  • Create sample websites and management dashboard"
+    echo "  • Install phpMyAdmin with PHP 8.4 compatibility"
+    echo "  • Configure PHP 8.4 optimizations and security settings"
+    echo
+    
+    read -p "Do you want to continue? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        error "Installation cancelled by user"
+    fi
+    
+    backup_configuration
+    analyze_existing_config
+    generate_webserver_module
+    update_main_configuration
+    setup_web_content
+    setup_phpmyadmin
+    create_helper_scripts
+    update_hosts_file
+    test_configuration
+    
     echo
     success "Installation completed successfully with PHP 8.4!"
-    echo
-    echo "📋 Configuration Summary:"
-    echo "   NixOS Config Directory: $NIXOS_CONFIG_DIR"
-    echo "   Backup Directory: $BACKUP_DIR"
-    echo "   Web Root Directory: $WEB_ROOT"
     echo
     echo "🎯 Next steps:"
     echo "1. Run: sudo nixos-rebuild switch"
@@ -1062,8 +770,7 @@ show_final_summary() {
     echo "   • create-site-db <db_name> - Create new database"
     echo "   • create-site-dir <domain> <site_name> - Create new site directory with PHP 8.4 template"
     echo
-    echo "📦 Backup & Recovery:"
-    echo "   • Backup location: $BACKUP_DIR"
+    echo "📦 Backup location: $BACKUP_DIR"
     echo "   • Run $BACKUP_DIR/restore.sh to restore original configuration"
     echo
     warning "Remember to change default database passwords in production!"
@@ -1072,54 +779,5 @@ show_final_summary() {
     echo "   php --version"
 }
 
-# Main installation function
-main() {
-    echo "🚀 NixOS Web Server Installation for Existing Systems (PHP 8.4)"
-    echo "=============================================================="
-    echo "Enhanced with Dynamic Path Configuration"
-    echo
-    
-    # Parse command line arguments first
-    parse_arguments "$@"
-    
-    # Validate paths and system
-    validate_and_normalize_paths
-    check_root
-    check_nixos
-    check_nixos_channel
-    
-    echo "This script will:"
-    echo "  • Create a backup of your current NixOS configuration"
-    echo "  • Add web server functionality with PHP 8.4 as a separate module"
-    echo "  • Set up nginx, PHP-FPM 8.4, and MariaDB"
-    echo "  • Create sample websites and management dashboard"
-    echo "  • Install phpMyAdmin with PHP 8.4 compatibility"
-    echo "  • Configure PHP 8.4 optimizations and security settings"
-    echo
-    echo "📁 Using configuration paths:"
-    echo "   NixOS Config: $NIXOS_CONFIG_DIR"
-    echo "   Backup Dir: $BACKUP_DIR"
-    echo "   Web Root: $WEB_ROOT"
-    echo
-    
-    read -p "Do you want to continue? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        error "Installation cancelled by user"
-    fi
-    
-    backup_configuration
-    analyze_existing_config
-    generate_webserver_module
-    update_main_configuration
-    setup_web_content
-    setup_phpmyadmin
-    create_helper_scripts
-    update_hosts_file
-    test_configuration
-    
-    show_final_summary
-}
-
-# Run main function with all arguments
+# Run main function
 main "$@"
