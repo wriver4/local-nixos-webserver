@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Redis management utility
 # Usage: manage-redis [status|flushall|flushdb|info] [database]

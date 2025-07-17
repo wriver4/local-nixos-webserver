@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
 
 # NixOS Web Server Setup Script
 # This script helps set up the web directories and content after NixOS rebuild
