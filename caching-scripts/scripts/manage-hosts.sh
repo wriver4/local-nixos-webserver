@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # Hosts file management utility for .local domains
 # Usage: manage-hosts [add|remove|list|backup|restore] [domain]

@@ -1,5 +1,4 @@
-#!/usr/bin/env bash
-
+#!/bin/bash
 
 # Monitor hosts file for .local domain changes
 # This script can be used to track hosts file modifications
