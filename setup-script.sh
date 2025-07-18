@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # NixOS Web Server Setup Script
 # This script helps set up the web directories and content after NixOS rebuild
@@ -26,8 +26,7 @@ sudo cp web-content/phpmyadmin/config.inc.php /var/www/phpmyadmin/
 
 # Set proper permissions
 echo "🔐 Setting permissions..."
-sudo chown -R nginx /var/www
-sudo chgrp -R nginx /var/www
+sudo chown -R nginx:nginx /var/www
 sudo chmod -R 755 /var/www
 
 # Create phpMyAdmin configuration storage

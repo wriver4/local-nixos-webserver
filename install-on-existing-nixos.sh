@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # NixOS Web Server Installation Script for Existing Systems (PHP 8.4)
 # This script safely integrates web server functionality into existing NixOS installations
@@ -99,7 +99,7 @@ backup_configuration() {
     
     # Create restore script
     sudo tee "$BACKUP_DIR/restore.sh" > /dev/null << EOF
-#!/usr/bin/env bash
+#!/bin/bash
 # Restore script created on $(date)
 echo "Restoring NixOS configuration from backup..."
 sudo cp -r "$BACKUP_DIR"/* "$NIXOS_CONFIG_DIR/"
@@ -429,16 +429,6 @@ generate_webserver_module() {
     chown nginx:nginx /var/log/php_errors.log
     chmod 644 /var/log/php_errors.log
   '';
-
-  # Ensure nginx user and group exist
-  users.users.nginx = {
-    isSystemUser = true;
-    group = "nginx";
-    home = "/var/lib/nginx";
-    createHome = true;
-  };
-
-  users.groups.nginx = {};
 }
 EOF
 
@@ -490,37 +480,6 @@ update_main_configuration() {
     success "Main configuration updated to import web server module"
 }
 
-# Create nginx user and group immediately
-create_nginx_user_group() {
-    log "Creating nginx user and group..."
-    
-    # Check if nginx group exists
-    if ! getent group nginx >/dev/null 2>&1; then
-        log "Creating nginx group..."
-        sudo groupadd -r nginx
-        success "nginx group created"
-    else
-        log "nginx group already exists"
-    fi
-    
-    # Check if nginx user exists
-    if ! getent passwd nginx >/dev/null 2>&1; then
-        log "Creating nginx user..."
-        sudo useradd -r -g nginx -d /var/lib/nginx -s /sbin/nologin -c "nginx web server" nginx
-        success "nginx user created"
-    else
-        log "nginx user already exists"
-    fi
-    
-    # Create nginx home directory
-    sudo mkdir -p /var/lib/nginx
-    sudo chown nginx /var/lib/nginx
-    sudo chgrp nginx /var/lib/nginx
-    sudo chmod 755 /var/lib/nginx
-    
-    success "nginx user and group setup complete"
-}
-
 # Setup web directories and content
 setup_web_content() {
     log "Setting up web directories and content..."
@@ -562,9 +521,8 @@ EOF
         done
     fi
     
-    # Set proper permissions using separate chown and chgrp commands
-    sudo chown -R nginx "$WEB_ROOT"
-    sudo chgrp -R nginx "$WEB_ROOT"
+    # Set proper permissions
+    sudo chown -R nginx:nginx "$WEB_ROOT"
     sudo chmod -R 755 "$WEB_ROOT"
     
     success "Web directories and content set up"
@@ -619,11 +577,6 @@ $cfg['AllowArbitraryServer'] = false;
 EOF
     fi
     
-    # Set proper permissions for phpMyAdmin using separate commands
-    sudo chown -R nginx "$phpmyadmin_dir"
-    sudo chgrp -R nginx "$phpmyadmin_dir"
-    sudo chmod -R 755 "$phpmyadmin_dir"
-    
     # Clean up
     cd "$SCRIPT_DIR"
     rm -rf "$temp_dir"
@@ -637,7 +590,7 @@ create_helper_scripts() {
     
     # Rebuild script
     sudo tee /usr/local/bin/rebuild-webserver > /dev/null << 'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 echo "🔄 Rebuilding NixOS configuration with PHP 8.4..."
 sudo nixos-rebuild switch
 if [ $? -eq 0 ]; then
@@ -653,11 +606,9 @@ else
 fi
 EOF
 
-    sudo chmod +x /usr/local/bin/rebuild-webserver
-
     # Database creation script
     sudo tee /usr/local/bin/create-site-db > /dev/null << 'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 if [ $# -ne 1 ]; then
     echo "Usage: $0 <database_name>"
     exit 1
@@ -680,11 +631,9 @@ else
 fi
 EOF
 
-    sudo chmod +x /usr/local/bin/create-site-db
-
     # Site directory creation script with PHP 8.4 template
     sudo tee /usr/local/bin/create-site-dir > /dev/null << 'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 if [ $# -ne 2 ]; then
     echo "Usage: $0 <domain> <site_name>"
     exit 1
@@ -697,7 +646,6 @@ SITE_DIR="/var/www/$DOMAIN"
 echo "Creating site directory: $SITE_DIR"
 mkdir -p "$SITE_DIR"
 
-# Create PHP 8.4 optimized index.php
 cat > "$SITE_DIR/index.php" << PHP
 <?php
 // $SITE_NAME - PHP 8.4 Ready
@@ -709,34 +657,29 @@ echo '<p>Created: ' . date('Y-m-d H:i:s') . '</p>';
 if (version_compare(PHP_VERSION, '8.4.0', '>=')) {
     echo '<h2>🚀 PHP 8.4 Features Available</h2>';
     echo '<ul>';
-    echo '<li>Property hooks for cleaner object-oriented code</li>';
+    echo '<li>Property hooks for cleaner code</li>';
     echo '<li>Asymmetric visibility modifiers</li>';
-    echo '<li>Enhanced performance and memory optimizations</li>';
-    echo '<li>New array and string manipulation functions</li>';
-    echo '<li>Improved type system and error handling</li>';
+    echo '<li>Enhanced performance and memory usage</li>';
+    echo '<li>New array and string functions</li>';
     echo '</ul>';
 }
 ?>
 PHP
 
-# Set proper ownership using separate commands
-chown -R nginx "$SITE_DIR"
-chgrp -R nginx "$SITE_DIR"
+chown -R nginx:nginx "$SITE_DIR"
 chmod -R 755 "$SITE_DIR"
 
 echo "✅ Site directory created successfully with PHP 8.4 template!"
-echo "📝 PHP 8.4 optimized index.php file created"
-echo "🔐 Permissions set correctly"
 EOF
 
-    sudo chmod +x /usr/local/bin/create-site-dir
-
-    success "Helper scripts created successfully"
+    sudo chmod +x /usr/local/bin/{rebuild-webserver,create-site-db,create-site-dir}
+    
+    success "Helper scripts created with PHP 8.4 support"
 }
 
-# Add hosts entries for local development
-add_hosts_entries() {
-    log "Adding local domain entries to /etc/hosts..."
+# Update hosts file
+update_hosts_file() {
+    log "Updating /etc/hosts file..."
     
     # Check if entries already exist
     if grep -q "dashboard.local" /etc/hosts; then
@@ -744,7 +687,7 @@ add_hosts_entries() {
         return 0
     fi
     
-    # Add entries
+    # Add local domain entries
     sudo tee -a /etc/hosts > /dev/null << 'EOF'
 
 # NixOS Web Server Local Domains (PHP 8.4)
@@ -758,52 +701,54 @@ EOF
     success "Local domain entries added to /etc/hosts"
 }
 
-# Create PHP error log
-setup_php_logging() {
-    log "Setting up PHP 8.4 error logging..."
+# Test configuration syntax
+test_configuration() {
+    log "Testing NixOS configuration syntax..."
     
-    sudo mkdir -p /var/log
-    sudo touch /var/log/php_errors.log
-    sudo chown nginx /var/log/php_errors.log
-    sudo chgrp nginx /var/log/php_errors.log
-    sudo chmod 644 /var/log/php_errors.log
-    
-    success "PHP error logging configured"
+    if sudo nixos-rebuild dry-build &>/dev/null; then
+        success "Configuration syntax is valid"
+    else
+        error "Configuration syntax error detected. Please check the configuration manually."
+    fi
 }
 
 # Main installation function
 main() {
-    echo "🚀 NixOS Web Server Installation Script (PHP 8.4)"
-    echo "=================================================="
+    echo "🚀 NixOS Web Server Installation for Existing Systems (PHP 8.4)"
+    echo "=============================================================="
     echo
     
-    # Pre-flight checks
     check_root
     check_nixos
     check_nixos_channel
     
-    # Backup and analysis
+    echo "This script will:"
+    echo "  • Create a backup of your current NixOS configuration"
+    echo "  • Add web server functionality with PHP 8.4 as a separate module"
+    echo "  • Set up nginx, PHP-FPM 8.4, and MariaDB"
+    echo "  • Create sample websites and management dashboard"
+    echo "  • Install phpMyAdmin with PHP 8.4 compatibility"
+    echo "  • Configure PHP 8.4 optimizations and security settings"
+    echo
+    
+    read -p "Do you want to continue? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        error "Installation cancelled by user"
+    fi
+    
     backup_configuration
     analyze_existing_config
-    
-    # Generate configuration
     generate_webserver_module
     update_main_configuration
-    
-    # Create nginx user/group before any file operations
-    create_nginx_user_group
-    
-    # Setup web content and services
     setup_web_content
     setup_phpmyadmin
-    setup_php_logging
-    
-    # Create helper scripts and hosts entries
     create_helper_scripts
-    add_hosts_entries
+    update_hosts_file
+    test_configuration
     
     echo
-    echo "✅ Installation complete!"
+    success "Installation completed successfully with PHP 8.4!"
     echo
     echo "🎯 Next steps:"
     echo "1. Run: sudo nixos-rebuild switch"
@@ -811,24 +756,27 @@ main() {
     echo "3. Access your sites:"
     echo "   • Dashboard: http://dashboard.local"
     echo "   • phpMyAdmin: http://phpmyadmin.local"
-    echo "   • Sample 1: http://sample1.local"
-    echo "   • Sample 2: http://sample2.local"
-    echo "   • Sample 3: http://sample3.local"
+    echo "   • Sample sites: http://sample1.local, http://sample2.local, http://sample3.local"
     echo
-    echo "🚀 PHP 8.4 Features Available:"
+    echo "🚀 PHP 8.4 Features:"
     echo "   • Property hooks for cleaner object-oriented code"
     echo "   • Asymmetric visibility modifiers"
-    echo "   • Enhanced performance with JIT improvements"
-    echo "   • New array functions and string manipulation"
+    echo "   • Enhanced performance and memory optimizations"
+    echo "   • New array and string manipulation functions"
     echo "   • Improved type system and error handling"
     echo
-    echo "🔧 Helper commands:"
-    echo "   • rebuild-webserver - Rebuild NixOS and restart services"
+    echo "🔧 Helper commands available:"
+    echo "   • rebuild-webserver - Rebuild NixOS and restart web services"
     echo "   • create-site-db <db_name> - Create new database"
-    echo "   • create-site-dir <domain> <site_name> - Create new site"
+    echo "   • create-site-dir <domain> <site_name> - Create new site directory with PHP 8.4 template"
     echo
     echo "📦 Backup location: $BACKUP_DIR"
-    echo "🔄 To restore: bash $BACKUP_DIR/restore.sh"
+    echo "   • Run $BACKUP_DIR/restore.sh to restore original configuration"
+    echo
+    warning "Remember to change default database passwords in production!"
+    echo
+    echo "🔍 Verify PHP version after rebuild:"
+    echo "   php --version"
 }
 
 # Run main function
