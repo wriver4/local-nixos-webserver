@@ -1,3 +1,5 @@
+# Still a work in progress not ready for primetime
+
 # NixOS Web Server with Virtual Host Management
 
 A complete NixOS configuration for hosting multiple PHP websites with nginx, PHP-FPM, MySQL/MariaDB, and **dynamic virtual host management** with **configurable installation paths**.
