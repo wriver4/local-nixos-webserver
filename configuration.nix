@@ -1,4 +1,5 @@
 # NixOS Configuration for Nginx with Virtual Domains and PHP-FPM (PHP 8.4)
+# Updated for NixOS 25.05 package naming conventions
 { config, pkgs, ... }:
 
 {
@@ -37,7 +38,7 @@
     ];
   };
 
-  # System packages
+  # System packages (NixOS 25.05: 'php' = PHP 8.4)
   environment.systemPackages = with pkgs; [
     vim
     wget
@@ -46,7 +47,7 @@
     tree
     htop
     mysql80
-    php84
+    php  # In NixOS 25.05, 'php' = PHP 8.4
   ];
 
   # Enable services
@@ -76,7 +77,7 @@
     '';
   };
 
-  # PHP-FPM configuration with PHP 8.4
+  # PHP-FPM configuration with PHP 8.4 (NixOS 25.05 naming)
   services.phpfpm = {
     pools.www = {
       user = "nginx";
@@ -92,8 +93,9 @@
         "pm.max_spare_servers" = 20;
         "pm.max_requests" = 500;
       };
-      phpPackage = pkgs.php84.buildEnv {
-        extensions = ({ enabled, all }: enabled ++ (with all; [
+      # NixOS 25.05: 'php' = PHP 8.4, extensions = php84Extensions.*
+      phpPackage = pkgs.php.buildEnv {
+        extensions = ({ enabled, all }: enabled ++ (with pkgs.php84Extensions; [
           mysqli
           pdo_mysql
           mbstring
