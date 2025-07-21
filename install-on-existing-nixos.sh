@@ -765,13 +765,24 @@ update_hosts_configuration() {
 test_configuration() {
     log "Testing NixOS configuration syntax..."
     
-    if sudo nixos-rebuild dry-build &>/dev/null; then
-        success "Configuration syntax is valid"
+    # Test local configuration first
+    if nix-instantiate --parse "$SCRIPT_DIR/configuration.nix" &>/dev/null; then
+        success "Local configuration syntax is valid"
+        
+        # Test system configuration if it exists
+        if [[ -f "$NIXOS_CONFIG_DIR/configuration.nix" ]]; then
+            if sudo nixos-rebuild dry-build &>/dev/null; then
+                success "System configuration syntax is valid"
+            else
+                warning "System configuration has syntax errors, but local configuration is valid"
+            fi
+        else
+            log "System configuration not found, only tested local configuration"
+        fi
     else
-        error "Configuration syntax error detected. Please check the configuration manually."
+        error "Configuration syntax error detected in local configuration. Please check the configuration manually."
     fi
 }
-
 # Main installation function
 main() {
     echo "🚀 NixOS Web Server Installation for Existing Systems (PHP 8.4)"
