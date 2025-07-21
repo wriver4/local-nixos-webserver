@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # NixOS Web Server Installation Script for Existing Systems (PHP 8.4)
 # This script safely integrates web server functionality into existing NixOS installations

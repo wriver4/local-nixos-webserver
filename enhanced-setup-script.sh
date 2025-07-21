@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Enhanced NixOS Web Server Setup Script with Virtual Host Management (PHP 8.4)
 # This script sets up the complete web environment with management capabilities
