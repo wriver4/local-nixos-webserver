@@ -46,6 +46,7 @@
     tree
     htop
     mysql80
+    php84
   ];
 
   # Enable services
