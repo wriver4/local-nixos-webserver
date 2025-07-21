@@ -13,6 +13,13 @@
   # Network configuration
   networking.hostName = "nixos-webserver";
   networking.networkmanager.enable = true;
+  networking.extraHosts = ''
+  127.0.0.1 dashboard.local
+  127.0.0.1 phpmyadmin.local
+  127.0.0.1 sample1.local
+  127.0.0.1 sample2.local
+  127.0.0.1 sample3.local
+  '';
 
   # Time zone and locale
   time.timeZone = "UTC";
