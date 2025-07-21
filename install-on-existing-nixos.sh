@@ -35,14 +35,35 @@ error() {
     exit 1
 }
 
-# Check if running as root
-check_root() {
+# Check if running as root or with sudo
+check_privileges() {
     if [[ $EUID -eq 0 ]]; then
-        error "This script should not be run as root. Please run as a regular user with sudo access."
+        # Running as root - this is actually fine for this script
+        SUDO_CMD=""
+        success "Running as root"
+    else
+        # Check if sudo is available and user can use it
+        if ! command -v sudo &> /dev/null; then
+            error "This script requires root privileges or sudo access. Please install sudo or run as root."
+        fi
+        
+        if ! sudo -n true 2>/dev/null; then
+            log "This script requires sudo access. You may be prompted for your password."
+            if ! sudo -v; then
+                error "Failed to obtain sudo privileges"
+            fi
+        fi
+        SUDO_CMD="sudo"
+        success "Sudo access confirmed"
     fi
-    
-    if ! sudo -n true 2>/dev/null; then
-        error "This script requires sudo access. Please ensure you can run sudo commands."
+}
+
+# Function to run commands with appropriate privileges
+run_privileged() {
+    if [[ $EUID -eq 0 ]]; then
+        "$@"
+    else
+        sudo "$@"
     fi
 }
 
@@ -677,28 +698,67 @@ EOF
     success "Helper scripts created with PHP 8.4 support"
 }
 
-# Update hosts file
-update_hosts_file() {
-    log "Updating /etc/hosts file..."
+# Update hosts file configuration in NixOS
+update_hosts_configuration() {
+    log "Configuring local domains in NixOS configuration..."
     
-    # Check if entries already exist
-    if grep -q "dashboard.local" /etc/hosts; then
-        warning "Local domain entries already exist in /etc/hosts"
+    local config_file="$NIXOS_CONFIG_DIR/configuration.nix"
+    
+    # Check if networking.extraHosts already exists
+    if grep -q "networking.extraHosts" "$config_file"; then
+        success "networking.extraHosts already configured in NixOS configuration"
         return 0
     fi
     
-    # Add local domain entries
-    sudo tee -a /etc/hosts > /dev/null << 'EOF'
-
-# NixOS Web Server Local Domains (PHP 8.4)
-127.0.0.1 dashboard.local
-127.0.0.1 phpmyadmin.local
-127.0.0.1 sample1.local
-127.0.0.1 sample2.local
-127.0.0.1 sample3.local
-EOF
-
-    success "Local domain entries added to /etc/hosts"
+    # Add networking.extraHosts to the configuration
+    local temp_file=$(mktemp)
+    
+    # Find networking section and add extraHosts
+    awk '
+    /networking\./ && !found_networking {
+        found_networking = 1
+        print $0
+        if ($0 ~ /networking\.hostName/) {
+            print "  networking.extraHosts = ''"
+            print "    127.0.0.1 dashboard.local"
+            print "    127.0.0.1 phpmyadmin.local"
+            print "    127.0.0.1 sample1.local"
+            print "    127.0.0.1 sample2.local"
+            print "    127.0.0.1 sample3.local"
+            print "  '';"
+        }
+        next
+    }
+    { print }
+    ' "$config_file" > "$temp_file"
+    
+    # If no networking section found, add it after imports
+    if ! grep -q "networking.extraHosts" "$temp_file"; then
+        awk '
+        /imports = \[/,/\];/ { print; next }
+        /^{/ && !added {
+            print $0
+            print ""
+            print "  # Network configuration"
+            print "  networking.extraHosts = ''"
+            print "    127.0.0.1 dashboard.local"
+            print "    127.0.0.1 phpmyadmin.local"
+            print "    127.0.0.1 sample1.local"
+            print "    127.0.0.1 sample2.local"
+            print "    127.0.0.1 sample3.local"
+            print "  '';"
+            print ""
+            added = 1
+            next
+        }
+        { print }
+        ' "$temp_file" > "${temp_file}.tmp" && mv "${temp_file}.tmp" "$temp_file"
+    fi
+    
+    sudo cp "$temp_file" "$config_file"
+    rm "$temp_file"
+    
+    success "Local domain configuration added to NixOS configuration"
 }
 
 # Test configuration syntax
@@ -718,7 +778,7 @@ main() {
     echo "=============================================================="
     echo
     
-    check_root
+    check_privileges
     check_nixos
     check_nixos_channel
     
@@ -744,7 +804,7 @@ main() {
     setup_web_content
     setup_phpmyadmin
     create_helper_scripts
-    update_hosts_file
+    update_hosts_configuration
     test_configuration
     
     echo

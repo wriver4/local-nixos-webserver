@@ -111,12 +111,29 @@ function updateNixOSConfig($sites) {
     }
     $virtual_hosts .= "    };";
     
+    // Generate networking.extraHosts section
+    $extra_hosts = "  networking.extraHosts = ''\n";
+    foreach ($sites as $site) {
+        if ($site['status'] === 'active') {
+            $extra_hosts .= "    127.0.0.1 {$site['domain']}\n";
+        }
+    }
+    $extra_hosts .= "  '';";
+    
     // Replace virtual hosts section in configuration
     $pattern = '/virtualHosts\s*=\s*\{.*?\};/s';
     $new_config = preg_replace($pattern, $virtual_hosts, $current_config);
     
     if ($new_config === null) {
-        return ['success' => false, 'message' => 'Failed to update configuration'];
+        return ['success' => false, 'message' => 'Failed to update virtualHosts configuration'];
+    }
+    
+    // Replace networking.extraHosts section in configuration
+    $hosts_pattern = '/networking\.extraHosts\s*=\s*\'\'.*?\'\';/s';
+    $new_config = preg_replace($hosts_pattern, $extra_hosts, $new_config);
+    
+    if ($new_config === null) {
+        return ['success' => false, 'message' => 'Failed to update networking.extraHosts configuration'];
     }
     
     // Write updated configuration
@@ -203,22 +220,18 @@ if ($_POST) {
                                 mkdir($site_dir, 0755, true);
                                 
                                 // Create basic index.php
-                                $index_content = "<?php\n// {$name}\necho '<h1>Welcome to {$name}</h1><p>This site is hosted on {$domain}</p>';\n?>";
+                                $index_content = "<?php\n// {$name}\necho '<h1>Welcome to {$name}</h1><p>This site is hosted on {$domain}</p><p>PHP Version: ' . PHP_VERSION . '</p>';\n?>";
                                 file_put_contents("{$site_dir}/index.php", $index_content);
                                 
                                 // Set proper ownership
                                 exec("sudo chown -R nginx:nginx {$site_dir}");
                             }
                             
-                            // Add to /etc/hosts
-                            $hosts_entry = "127.0.0.1 {$domain}\n";
-                            file_put_contents('/etc/hosts', $hosts_entry, FILE_APPEND | LOCK_EX);
-                            
                             $log_stmt = $pdo->prepare("INSERT INTO logs (site_id, action, details) VALUES (?, 'Site added', 'New virtual host created: {$domain}')");
                             $log_stmt->execute([$site_id]);
                             
                             if (empty($message)) {
-                                $message = 'Site added successfully! Remember to rebuild NixOS configuration.';
+                                $message = 'Site added successfully! Remember to rebuild NixOS configuration to update /etc/hosts.';
                                 $message_type = 'success';
                             }
                         }
@@ -254,12 +267,7 @@ if ($_POST) {
                                 $log_stmt = $pdo->prepare("INSERT INTO logs (site_id, action, details) VALUES (NULL, 'Site removed', 'Virtual host removed: {$site['domain']}')");
                                 $log_stmt->execute();
                                 
-                                // Remove from /etc/hosts
-                                $hosts_content = file_get_contents('/etc/hosts');
-                                $hosts_content = preg_replace("/127\.0\.0\.1\s+{$site['domain']}\n?/", '', $hosts_content);
-                                file_put_contents('/etc/hosts', $hosts_content);
-                                
-                                $message = 'Site removed successfully! Remember to rebuild NixOS configuration and manually remove the directory if needed.';
+                                $message = 'Site removed successfully! Remember to rebuild NixOS configuration to update /etc/hosts and manually remove the directory if needed.';
                                 $message_type = 'success';
                             } catch (Exception $e) {
                                 $message = 'Error removing site: ' . $e->getMessage();
@@ -279,7 +287,7 @@ if ($_POST) {
                     $log_stmt = $pdo->prepare("INSERT INTO logs (site_id, action, details) VALUES (NULL, 'Config rebuilt', 'NixOS configuration updated')");
                     $log_stmt->execute();
                     
-                    $message = 'Configuration updated! Run "sudo nixos-rebuild switch" to apply changes.';
+                    $message = 'Configuration updated! Run "sudo nixos-rebuild switch" to apply changes and update /etc/hosts.';
                     $message_type = 'success';
                 } else {
                     $message = 'Configuration update failed: ' . $result['message'];
@@ -343,6 +351,24 @@ if (isset($pdo)) {
         .header p {
             color: #718096;
             font-size: 1.1rem;
+        }
+        
+        .info-box {
+            background: #e6fffa;
+            border: 1px solid #81e6d9;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .info-box h3 {
+            color: #234e52;
+            margin-bottom: 10px;
+        }
+        
+        .info-box p {
+            color: #2d3748;
+            margin-bottom: 5px;
         }
         
         .grid {
@@ -646,6 +672,14 @@ if (isset($pdo)) {
         <div class="header">
             <h1>🚀 Web Server Dashboard</h1>
             <p>Manage your NixOS web server with nginx, PHP-FPM, MySQL and Virtual Host Management</p>
+        </div>
+        
+        <div class="info-box">
+            <h3>📋 NixOS Configuration Management</h3>
+            <p>• This dashboard manages both nginx virtual hosts and networking.extraHosts in your NixOS configuration</p>
+            <p>• After making changes, click "Rebuild NixOS Configuration" to update the config file</p>
+            <p>• Run <code>sudo nixos-rebuild switch</code> to apply changes and update /etc/hosts</p>
+            <p>• Local domains are managed through NixOS configuration, not by directly editing /etc/hosts</p>
         </div>
         
         <?php if (!empty($message)): ?>
