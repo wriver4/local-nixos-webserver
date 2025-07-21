@@ -291,10 +291,10 @@ generate_webserver_module() {
       # Dashboard
       "dashboard.local" = {
         root = "/var/www/dashboard";
-        index = "index.php index.html";
         locations = {
           "/" = {
             tryFiles = "$uri $uri/ /index.php?$query_string";
+            index = "index.php index.html";
           };
           "~ \\.php$" = {
             extraConfig = ''
@@ -315,10 +315,10 @@ generate_webserver_module() {
       # phpMyAdmin
       "phpmyadmin.local" = {
         root = "/var/www/phpmyadmin";
-        index = "index.php";
         locations = {
           "/" = {
             tryFiles = "$uri $uri/ /index.php?$query_string";
+            index = "index.php";
           };
           "~ \\.php$" = {
             extraConfig = ''
@@ -339,10 +339,10 @@ generate_webserver_module() {
       # Sample Domain 1
       "sample1.local" = {
         root = "/var/www/sample1";
-        index = "index.php index.html";
         locations = {
           "/" = {
             tryFiles = "$uri $uri/ /index.php?$query_string";
+            index = "index.php index.html";
           };
           "~ \\.php$" = {
             extraConfig = ''
@@ -363,10 +363,10 @@ generate_webserver_module() {
       # Sample Domain 2
       "sample2.local" = {
         root = "/var/www/sample2";
-        index = "index.php index.html";
         locations = {
           "/" = {
             tryFiles = "$uri $uri/ /index.php?$query_string";
+            index = "index.php index.html";
           };
           "~ \\.php$" = {
             extraConfig = ''
@@ -387,10 +387,10 @@ generate_webserver_module() {
       # Sample Domain 3
       "sample3.local" = {
         root = "/var/www/sample3";
-        index = "index.php index.html";
         locations = {
           "/" = {
             tryFiles = "$uri $uri/ /index.php?$query_string";
+            index = "index.php index.html";
           };
           "~ \\.php$" = {
             extraConfig = ''
