@@ -188,7 +188,7 @@ generate_webserver_module() {
     mysql80
     tree
     htop
-    php84  # PHP 8.4 CLI
+    php  # In NixOS 25.05, 'php' = PHP 8.4
   ];
 
   # Enable services
@@ -234,7 +234,7 @@ generate_webserver_module() {
         "pm.max_spare_servers" = 20;
         "pm.max_requests" = 500;
       };
-      phpPackage = pkgs.php84.buildEnv {
+      phpPackage = pkgs.php.buildEnv {
         extensions = ({ enabled, all }: enabled ++ (with all; [
           mysqli
           pdo_mysql
@@ -704,28 +704,24 @@ update_hosts_configuration() {
     
     local config_file="$NIXOS_CONFIG_DIR/configuration.nix"
     
-    # Check if networking.extraHosts already exists
-    if grep -q "networking.extraHosts" "$config_file"; then
-        success "networking.extraHosts already configured in NixOS configuration"
+    # Check if networking.hosts already exists
+    if grep -q "networking.hosts" "$config_file"; then
+        success "networking.hosts already configured in NixOS configuration"
         return 0
     fi
     
-    # Add networking.extraHosts to the configuration
+    # Add networking.hosts to the configuration
     local temp_file=$(mktemp)
     
-    # Find networking section and add extraHosts
+    # Find networking section and add hosts
     awk '
     /networking\./ && !found_networking {
         found_networking = 1
         print $0
         if ($0 ~ /networking\.hostName/) {
-            print "  networking.extraHosts = ''"
-            print "    127.0.0.1 dashboard.local"
-            print "    127.0.0.1 phpmyadmin.local"
-            print "    127.0.0.1 sample1.local"
-            print "    127.0.0.1 sample2.local"
-            print "    127.0.0.1 sample3.local"
-            print "  '';"
+            print "  networking.hosts = {"
+            print "    \"127.0.0.1\" = [ \"localhost\" \"dashboard.local\" \"phpmyadmin.local\" \"sample1.local\" \"sample2.local\" \"sample3.local\" ];"
+            print "  };"
         }
         next
     }
@@ -733,20 +729,16 @@ update_hosts_configuration() {
     ' "$config_file" > "$temp_file"
     
     # If no networking section found, add it after imports
-    if ! grep -q "networking.extraHosts" "$temp_file"; then
+    if ! grep -q "networking.hosts" "$temp_file"; then
         awk '
         /imports = \[/,/\];/ { print; next }
         /^{/ && !added {
             print $0
             print ""
             print "  # Network configuration"
-            print "  networking.extraHosts = ''"
-            print "    127.0.0.1 dashboard.local"
-            print "    127.0.0.1 phpmyadmin.local"
-            print "    127.0.0.1 sample1.local"
-            print "    127.0.0.1 sample2.local"
-            print "    127.0.0.1 sample3.local"
-            print "  '';"
+            print "  networking.hosts = {"
+            print "    \"127.0.0.1\" = [ \"localhost\" \"dashboard.local\" \"phpmyadmin.local\" \"sample1.local\" \"sample2.local\" \"sample3.local\" ];"
+            print "  };"
             print ""
             added = 1
             next

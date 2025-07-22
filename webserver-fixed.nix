@@ -9,7 +9,7 @@
     mysql80
     tree
     htop
-    php84  # PHP 8.4 CLI
+    php  # In NixOS 25.05, 'php' = PHP 8.4
   ];
 
   # Enable services
@@ -55,7 +55,7 @@
         "pm.max_spare_servers" = 20;
         "pm.max_requests" = 500;
       };
-      phpPackage = pkgs.php84.buildEnv {
+      phpPackage = pkgs.php.buildEnv {
         extensions = ({ enabled, all }: enabled ++ (with all; [
           mysqli
           pdo_mysql

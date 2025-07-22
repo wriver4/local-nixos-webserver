@@ -14,10 +14,6 @@
   # Network configuration
   networking.hostName = "nixos-webserver";
   networking.networkmanager.enable = true;
-  networking.hosts = {
-    "127.0.0.1" = [ "localhost" "dashboard.local" "phpmyadmin.local" "sample1.local" "sample2.local" "sample3.local" ];
-    "127.0.0.2" = [ "king" ];
-  };
 
   # Time zone and locale
   time.timeZone = "UTC";

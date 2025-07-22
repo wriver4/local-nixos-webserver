@@ -29,7 +29,7 @@
     # Optional: Development shell for web development
     devShells.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.mkShell {
       buildInputs = with nixpkgs.legacyPackages.x86_64-linux; [
-        php84
+        php  # In NixOS 25.05, php = PHP 8.4
         mysql80
         nodejs
         git

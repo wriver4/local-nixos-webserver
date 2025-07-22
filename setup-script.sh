@@ -159,9 +159,9 @@ else
     warning "MySQL not found - database setup will be skipped"
 fi
 
-# Note: /etc/hosts is managed by NixOS configuration (networking.extraHosts)
+# Note: /etc/hosts is managed by NixOS configuration (networking.hosts)
 log "Local domain configuration..."
-success "Local domains are configured in NixOS configuration.nix (networking.extraHosts)"
+success "Local domains are configured in NixOS configuration.nix (networking.hosts)"
 log "Domains available after nixos-rebuild switch:"
 log "  • dashboard.local"
 log "  • phpmyadmin.local" 
