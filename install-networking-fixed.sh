@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# NixOS Web Server Installation with Separate Networking Module
+# NixOS Web Server Installation with Separate Networking Module (Fixed)
 # This script installs the webserver with networking configuration in a separate module
 
 set -e  # Exit on any error
@@ -113,12 +113,13 @@ analyze_existing_structure() {
         fi
     fi
     
+    # Write analysis with proper permissions
     sudo tee "$BACKUP_DIR/structure-analysis.txt" > /dev/null << EOF
 STRUCTURE_ANALYSIS:
-    echo "HAS_MODULES=$has_modules" >> "$BACKUP_DIR/structure-analysis.txt"
-    echo "HAS_SERVICES=$has_services" >> "$BACKUP_DIR/structure-analysis.txt"
-    echo "HAS_HOSTS=$has_hosts" >> "$BACKUP_DIR/structure-analysis.txt"
-    HAS_NETWORKING=$has_networking
+HAS_MODULES=$has_modules
+HAS_SERVICES=$has_services
+HAS_HOSTS=$has_hosts
+HAS_NETWORKING=$has_networking
 EOF
 }
 
@@ -315,14 +316,6 @@ generate_instructions() {
 - ✅ Firewall configuration centralized
 - ✅ Network optimization settings included
 
-## Networking Module Features
-- **Host entries**: All .local domains for webserver
-- **Firewall**: Basic configuration with service ports appended
-- **Network optimization**: TCP/IP performance tuning
-- **Security**: Network security hardening
-- **DNS**: Configured with fallback servers
-- **Monitoring tools**: Network debugging utilities
-
 ## Integration Steps
 
 ### 1. Import webserver module
@@ -347,44 +340,6 @@ After successful rebuild:
 - phpMyAdmin: http://phpmyadmin.local
 - Sample sites: http://sample1.local, http://sample2.local, http://sample3.local
 
-## Customization
-
-### Adding New Hosts
-Edit \`modules/networking.nix\`:
-\`\`\`nix
-networking.hosts = {
-  "127.0.0.1" = [ 
-    "localhost" 
-    "dashboard.local" 
-    "phpmyadmin.local" 
-    "sample1.local" 
-    "sample2.local" 
-    "sample3.local"
-    "newsite.local"  # Add new hosts here
-  ];
-};
-\`\`\`
-
-### Firewall Configuration
-Service modules automatically append their ports:
-- nginx.nix adds ports 80, 443
-- mysql.nix adds port 3306
-- Base configuration in networking.nix includes port 22 (SSH)
-
-### Network Optimization
-All network performance settings are in \`modules/networking.nix\`:
-- TCP optimization
-- Buffer sizes
-- Security settings
-
-## Benefits
-- ✅ Centralized networking configuration
-- ✅ No more networking.hosts syntax errors
-- ✅ Clean separation of concerns
-- ✅ Easy to manage and modify
-- ✅ Network optimization included
-- ✅ Security hardening applied
-
 ## Backup Location
 - Full backup: $BACKUP_DIR
 - Restore command: \`sudo $BACKUP_DIR/restore.sh\`
@@ -395,8 +350,8 @@ EOF
 
 # Main function
 main() {
-    echo "🌐 NixOS Webserver Installation with Separate Networking Module"
-    echo "=============================================================="
+    echo "🌐 NixOS Webserver Installation with Separate Networking Module (Fixed)"
+    echo "====================================================================="
     echo ""
     
     check_privileges

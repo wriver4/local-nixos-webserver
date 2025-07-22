@@ -6,9 +6,8 @@
 
 {
   # PHP-FPM service configuration with conflict resolution
+  # Note: PHP-FPM is automatically enabled when pools are configured
   services.phpfpm = {
-    enable = lib.mkDefault true;
-    
     # Default PHP pool configuration
     pools.www = {
       user = lib.mkDefault "nginx";
