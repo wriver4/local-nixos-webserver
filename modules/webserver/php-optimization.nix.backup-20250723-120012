@@ -6,9 +6,11 @@
 {
   # PHP-FPM webserver-specific configuration
   # This enhances the existing PHP configuration with webserver optimizations
-  # Note: PHP-FPM is automatically enabled when pools are configured
   
   services.phpfpm = {
+    # Ensure PHP-FPM is enabled (uses mkDefault to not conflict)
+    enable = lib.mkDefault true;
+    
     # Configure webserver-specific PHP pool
     pools.www = lib.mkMerge [
       {
@@ -64,7 +66,10 @@
             curl
             openssl
             
-            # Note: json, session, filter are built-in to PHP 8.4
+            # Core functionality
+            json
+            session
+            filter
           ]));
           
           extraConfig = ''

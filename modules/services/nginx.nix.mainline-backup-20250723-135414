@@ -1,17 +1,17 @@
-# Enhanced Nginx Service Module with Mainline Package
-# This module provides nginx service using the mainline (latest stable) package
+# Enhanced Nginx Service Module
+# This module provides nginx configuration that works with existing setups
+# Uses lib.mkDefault extensively to avoid conflicts
 
 { config, pkgs, lib, ... }:
 
 {
-  # Nginx service configuration with mainline package
+  # Nginx service configuration with conflict resolution
   services.nginx = {
     enable = lib.mkDefault true;
-    package = lib.mkDefault pkgs.nginxMainline;  # Use mainline version
     user = lib.mkDefault "nginx";
     group = lib.mkDefault "nginx";
     
-    # Basic configuration optimized for mainline
+    # Global nginx configuration
     appendConfig = lib.mkDefault ''
       worker_processes auto;
       worker_connections 1024;
@@ -23,7 +23,7 @@
       }
     '';
 
-    # HTTP configuration with mainline-specific optimizations
+    # Common HTTP configuration
     commonHttpConfig = lib.mkDefault ''
       # Basic optimization
       sendfile on;
@@ -37,7 +37,7 @@
       client_header_buffer_size 1k;
       large_client_header_buffers 4 4k;
       
-      # Compression with mainline improvements
+      # Compression
       gzip on;
       gzip_vary on;
       gzip_min_length 1024;
@@ -54,13 +54,13 @@
         application/atom+xml
         image/svg+xml;
       
-      # Security headers
+      # Security headers (basic)
       server_tokens off;
       add_header X-Frame-Options SAMEORIGIN always;
       add_header X-Content-Type-Options nosniff always;
       add_header X-XSS-Protection "1; mode=block" always;
       
-      # Rate limiting
+      # Rate limiting zones
       limit_req_zone $binary_remote_addr zone=login:10m rate=5r/m;
       limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
       
@@ -83,6 +83,14 @@
 
   users.groups.nginx = lib.mkIf (!config.users.groups ? nginx) {};
 
+  # Systemd service optimization
+  systemd.services.nginx.serviceConfig = lib.mkMerge [
+    {
+      LimitNOFILE = lib.mkDefault 65535;
+      LimitNPROC = lib.mkDefault 4096;
+    }
+  ];
+
   # Open HTTP and HTTPS ports
   networking.firewall.allowedTCPPorts = lib.mkAfter [ 80 443 ];
 
@@ -90,17 +98,7 @@
   system.activationScripts.nginx-dirs = ''
     mkdir -p /var/lib/nginx
     mkdir -p /var/log/nginx
-    mkdir -p /run/nginx
     chown -R nginx:nginx /var/lib/nginx
     chown -R nginx:nginx /var/log/nginx
-    chown -R nginx:nginx /run/nginx
   '';
-
-  # Systemd service optimization for mainline
-  systemd.services.nginx.serviceConfig = lib.mkMerge [
-    {
-      LimitNOFILE = lib.mkDefault 65535;
-      LimitNPROC = lib.mkDefault 4096;
-    }
-  ];
 }
