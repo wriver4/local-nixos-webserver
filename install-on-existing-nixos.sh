@@ -256,98 +256,6 @@ check_nixos_channel() {
     fi
 }
 
-# Scan for existing users and determine group memberships
-scan_existing_users() {
-    log "Scanning for existing users and determining group memberships..."
-    
-    # Get all regular users (UID >= 1000, excluding nobody)
-    local existing_users=()
-    while IFS=: read -r username _ uid gid _ _ home shell; do
-        # Skip system users, nobody, and users with nologin/false shells
-        if [[ $uid -ge 1000 && $username != "nobody" && $shell != "/sbin/nologin" && $shell != "/bin/false" && $shell != "/usr/sbin/nologin" ]]; then
-            existing_users+=("$username")
-        fi
-    done < /etc/passwd
-    
-    if [[ ${#existing_users[@]} -eq 0 ]]; then
-        warning "No existing regular users found"
-        return 0
-    fi
-    
-    echo -e "${CYAN}📋 Found existing users:${NC}"
-    for user in "${existing_users[@]}"; do
-        local user_groups=$(groups "$user" 2>/dev/null | cut -d: -f2 | tr ' ' '\n' | sort | tr '\n' ' ')
-        echo "  👤 $user: groups($user_groups)"
-    done
-    
-    echo ""
-    echo -e "${CYAN}🔧 Web server group recommendations:${NC}"
-    echo "  • wheel - sudo access for service management"
-    echo "  • nginx - access to nginx configuration and logs"
-    echo "  • www-data - access to web content directories"
-    echo "  • mysql - database access and management"
-    echo "  • redis - redis cache management"
-    echo "  • systemd-journal - access to system logs"
-    echo ""
-    
-    # Store users for later group assignment
-    EXISTING_USERS=("${existing_users[@]}")
-    
-    success "User scan completed - found ${#existing_users[@]} users"
-}
-
-# Add existing users to web server groups
-add_users_to_webserver_groups() {
-    if [[ ${#EXISTING_USERS[@]} -eq 0 ]]; then
-        log "No existing users to add to web server groups"
-        return 0
-    fi
-    
-    log "Adding existing users to web server groups for CLI access..."
-    
-    # Define the groups that provide web server CLI capabilities
-    local web_groups=("wheel" "nginx" "www-data" "mysql" "redis" "systemd-journal")
-    
-    for user in "${EXISTING_USERS[@]}"; do
-        log "Processing user: $user"
-        
-        # Get current user groups
-        local current_groups=($(groups "$user" 2>/dev/null | cut -d: -f2))
-        
-        # Determine which groups to add
-        local groups_to_add=()
-        for group in "${web_groups[@]}"; do
-            # Check if user is already in the group
-            if ! printf '%s\n' "${current_groups[@]}" | grep -q "^$group$"; then
-                # Check if group exists (some may not exist yet)
-                if getent group "$group" >/dev/null 2>&1; then
-                    groups_to_add+=("$group")
-                fi
-            fi
-        done
-        
-        if [[ ${#groups_to_add[@]} -gt 0 ]]; then
-            log "Adding $user to groups: ${groups_to_add[*]}"
-            
-            # Add user to each group
-            for group in "${groups_to_add[@]}"; do
-                if sudo usermod -a -G "$group" "$user" 2>/dev/null; then
-                    success "Added $user to $group group"
-                else
-                    warning "Failed to add $user to $group group (group may not exist yet)"
-                fi
-            done
-        else
-            log "User $user already has appropriate group memberships"
-        fi
-    done
-    
-    # Store user group assignments for NixOS configuration
-    USERS_FOR_NIXOS_CONFIG=("${EXISTING_USERS[@]}")
-    
-    success "User group assignments completed"
-}
-
 # Create backup of existing configuration
 backup_configuration() {
     log "Creating backup of existing NixOS configuration..."
@@ -444,74 +352,588 @@ create_service_modules() {
     # Create modules directory structure
     sudo mkdir -p "$NIXOS_CONFIG_DIR/modules/services"
     
-    # Create service modules with updated content
-    log "Creating nginx.nix service module..."
-    sudo tee "$NIXOS_CONFIG_DIR/modules/services/nginx.nix" > /dev/null << 'EOF'
-# Nginx Web Server Configuration Module
-# NixOS 25.05 Compatible
-# High-performance web server with FastCGI caching
-
-{ config, pkgs, ... }:
-
-{
-  # Nginx web server configuration
-  services.nginx = {
-    enable = true;
-    user = "nginx";
-    group = "nginx";
+    # Copy service modules from script directory
+    if [[ -d "$SCRIPT_DIR/modules/services" ]]; then
+        log "Copying service modules from script directory..."
+        sudo cp -r "$SCRIPT_DIR/modules/services"/* "$NIXOS_CONFIG_DIR/modules/services/"
+    else
+        error "Service modules not found in script directory: $SCRIPT_DIR/modules/services"
+    fi
     
-    # Performance optimization
-    appendConfig = ''
-      worker_processes auto;
-      worker_connections 1024;
-      worker_rlimit_nofile 2048;
-      
-      # Event handling optimization
-      events {
-        use epoll;
-        multi_accept on;
-      }
-    '';
+    # Update web root paths in service modules if different from default
+    if [[ "$WEB_ROOT" != "/var/www" ]]; then
+        log "Updating web root paths in service modules..."
+        sudo sed -i "s|/var/www|$WEB_ROOT|g" "$NIXOS_CONFIG_DIR/modules/services/nginx.nix"
+        sudo sed -i "s|/var/www|$WEB_ROOT|g" "$NIXOS_CONFIG_DIR/modules/services/system.nix"
+        sudo sed -i "s|/var/www|$WEB_ROOT|g" "$NIXOS_CONFIG_DIR/modules/services/users.nix"
+    fi
+    
+    success "Service modules created successfully"
+}
 
-    # Global HTTP configuration with caching and security
-    commonHttpConfig = ''
-      # Basic performance settings
-      sendfile on;
-      tcp_nopush on;
-      tcp_nodelay on;
-      keepalive_timeout 65;
-      keepalive_requests 100;
-      types_hash_max_size 2048;
-      client_max_body_size 64M;
-      client_body_timeout 12;
-      client_header_timeout 12;
-      send_timeout 10;
-      
-      # Buffer settings
-      client_body_buffer_size 10K;
-      client_header_buffer_size 1k;
-      large_client_header_buffers 2 1k;
-      
-      # Gzip compression
-      gzip on;
-      gzip_vary on;
-      gzip_min_length 1024;
-      gzip_comp_level 6;
-      gzip_proxied any;
-      gzip_types
-        text/plain
-        text/css
-        text/xml
-        text/javascript
-        application/json
-        application/javascript
-        application/xml+rss
-        application/atom+xml
-        image/svg+xml;
-      
-      # FastCGI caching configuration
-      fastcgi_cache_path /var/cache/nginx/fastcgi 
-        levels=1:2 
-        keys_zone=PHPFPM:100m 
-        inactive=60m 
-        max_size=1g;
+# Update main configuration to use modular structure
+update_main_configuration() {
+    log "Updating main NixOS configuration to use modular structure..."
+    
+    local config_file="$NIXOS_CONFIG_DIR/configuration.nix"
+    local temp_file=$(mktemp)
+    
+    # Copy the new modular configuration.nix
+    if [[ -f "$SCRIPT_DIR/configuration.nix" ]]; then
+        sudo cp "$SCRIPT_DIR/configuration.nix" "$config_file"
+        
+        # Update system state version to 25.05
+        sudo sed -i 's/system\.stateVersion = "[^"]*"/system.stateVersion = "25.05"/' "$config_file"
+        
+        # Update web root if different from default
+        if [[ "$WEB_ROOT" != "/var/www" ]]; then
+            sudo sed -i "s|/var/www|$WEB_ROOT|g" "$config_file"
+        fi
+        
+        success "Main configuration updated with modular structure and system state 25.05"
+    else
+        error "Main configuration template not found: $SCRIPT_DIR/configuration.nix"
+    fi
+}
+
+# Create nginx user and group immediately
+create_nginx_user_group() {
+    log "Creating nginx user and group..."
+    
+    # Check if nginx group exists
+    if ! getent group nginx >/dev/null 2>&1; then
+        log "Creating nginx group..."
+        sudo groupadd -r nginx
+        success "nginx group created"
+    else
+        log "nginx group already exists"
+    fi
+    
+    # Check if nginx user exists
+    if ! getent passwd nginx >/dev/null 2>&1; then
+        log "Creating nginx user..."
+        sudo useradd -r -g nginx -d /var/lib/nginx -s /sbin/nologin -c "nginx web server" nginx
+        success "nginx user created"
+    else
+        log "nginx user already exists"
+    fi
+    
+    # Create nginx home directory
+    sudo mkdir -p /var/lib/nginx
+    sudo chown nginx /var/lib/nginx
+    sudo chgrp nginx /var/lib/nginx
+    sudo chmod 755 /var/lib/nginx
+    
+    success "nginx user and group setup complete"
+}
+
+# Setup web directories and content
+setup_web_content() {
+    log "Setting up web directories and content..."
+    
+    # Create web directories
+    sudo mkdir -p "$WEB_ROOT"/{dashboard,phpmyadmin,sample1,sample2,sample3,caching-scripts}
+    sudo mkdir -p "$WEB_ROOT/caching-scripts"/{api,scripts}
+    
+    # Copy web content if available
+    if [[ -d "$SCRIPT_DIR/web-content" ]]; then
+        log "Copying web content from script directory..."
+        sudo cp -r "$SCRIPT_DIR/web-content/dashboard"/* "$WEB_ROOT/dashboard/" 2>/dev/null || true
+        sudo cp -r "$SCRIPT_DIR/web-content/sample1"/* "$WEB_ROOT/sample1/" 2>/dev/null || true
+        sudo cp -r "$SCRIPT_DIR/web-content/sample2"/* "$WEB_ROOT/sample2/" 2>/dev/null || true
+        sudo cp -r "$SCRIPT_DIR/web-content/sample3"/* "$WEB_ROOT/sample3/" 2>/dev/null || true
+        sudo cp -r "$SCRIPT_DIR/caching-scripts"/* "$WEB_ROOT/caching-scripts/" 2>/dev/null || true
+    else
+        warning "Web content directory not found. Creating basic placeholder files..."
+        
+        # Create basic index files for each site with PHP 8.4 info
+        for site in dashboard sample1 sample2 sample3; do
+            sudo tee "$WEB_ROOT/$site/index.php" > /dev/null << EOF
+<?php
+echo "<h1>Welcome to $site.local</h1>";
+echo "<p>This is a placeholder page. Replace with your actual content.</p>";
+echo "<p>PHP Version: " . PHP_VERSION . "</p>";
+echo "<p>Server time: " . date('Y-m-d H:i:s') . "</p>";
+
+// Display PHP 8.4 features
+if (version_compare(PHP_VERSION, '8.4.0', '>=')) {
+    echo "<h2>🚀 PHP 8.4 Features Available</h2>";
+    echo "<ul>";
+    echo "<li>Property hooks</li>";
+    echo "<li>Asymmetric visibility</li>";
+    echo "<li>New array functions</li>";
+    echo "<li>Performance improvements</li>";
+    echo "</ul>";
+}
+?>
+EOF
+        done
+        
+        # Create basic caching scripts index
+        sudo tee "$WEB_ROOT/caching-scripts/index.php" > /dev/null << 'EOF'
+<?php
+echo "<h1>Caching Scripts Management</h1>";
+echo "<p>This is a placeholder for the caching scripts system.</p>";
+echo "<p>PHP Version: " . PHP_VERSION . "</p>";
+?>
+EOF
+    fi
+    
+    # Set proper permissions using separate chown and chgrp commands
+    sudo chown -R nginx "$WEB_ROOT"
+    sudo chgrp -R nginx "$WEB_ROOT"
+    sudo chmod -R 755 "$WEB_ROOT"
+    
+    success "Web directories and content set up"
+}
+
+# Setup phpMyAdmin with PHP 8.4 compatibility
+setup_phpmyadmin() {
+    log "Setting up phpMyAdmin with PHP 8.4 compatibility..."
+    
+    local phpmyadmin_dir="$WEB_ROOT/phpmyadmin"
+    local temp_dir="/tmp/phpmyadmin-setup"
+    
+    # Download and extract phpMyAdmin (latest version for PHP 8.4 compatibility)
+    mkdir -p "$temp_dir"
+    cd "$temp_dir"
+    
+    if ! wget -q "https://files.phpmyadmin.net/phpMyAdmin/5.2.1/phpMyAdmin-5.2.1-all-languages.tar.gz"; then
+        warning "Failed to download phpMyAdmin. You'll need to set it up manually."
+        return 1
+    fi
+    
+    tar -xzf phpMyAdmin-5.2.1-all-languages.tar.gz
+    sudo cp -r phpMyAdmin-5.2.1-all-languages/* "$phpmyadmin_dir/"
+    
+    # Create phpMyAdmin configuration with PHP 8.4 optimizations
+    if [[ -f "$SCRIPT_DIR/web-content/phpmyadmin/config.inc.php" ]]; then
+        sudo cp "$SCRIPT_DIR/web-content/phpmyadmin/config.inc.php" "$phpmyadmin_dir/"
+    else
+        sudo tee "$phpmyadmin_dir/config.inc.php" > /dev/null << 'EOF'
+<?php
+declare(strict_types=1);
+
+$cfg['blowfish_secret'] = 'nixos-webserver-phpmyadmin-secret-key-2024-php84';
+
+$i = 0;
+$i++;
+$cfg['Servers'][$i]['auth_type'] = 'cookie';
+$cfg['Servers'][$i]['host'] = 'localhost';
+$cfg['Servers'][$i]['compress'] = false;
+$cfg['Servers'][$i]['AllowNoPassword'] = false;
+
+// PHP 8.4 optimizations
+$cfg['OBGzip'] = true;
+$cfg['PersistentConnections'] = true;
+$cfg['ExecTimeLimit'] = 300;
+$cfg['MemoryLimit'] = '256M';
+
+// Security settings
+$cfg['ForceSSL'] = false;
+$cfg['CheckConfigurationPermissions'] = true;
+$cfg['AllowArbitraryServer'] = false;
+EOF
+    fi
+    
+    # Set proper permissions for phpMyAdmin using separate commands
+    sudo chown -R nginx "$phpmyadmin_dir"
+    sudo chgrp -R nginx "$phpmyadmin_dir"
+    sudo chmod -R 755 "$phpmyadmin_dir"
+    
+    # Clean up
+    cd "$SCRIPT_DIR"
+    rm -rf "$temp_dir"
+    
+    success "phpMyAdmin set up successfully with PHP 8.4 compatibility"
+}
+
+# Create helper scripts with PHP 8.4 support and NixOS hosts management
+create_helper_scripts() {
+    log "Creating helper scripts with PHP 8.4 support and NixOS hosts management..."
+    
+    # Rebuild script
+    sudo tee /usr/local/bin/rebuild-webserver > /dev/null << 'EOF'
+#!/usr/bin/env bash
+echo "🔄 Rebuilding NixOS configuration with PHP 8.4 and modular services..."
+sudo nixos-rebuild switch
+if [ $? -eq 0 ]; then
+    echo "✅ NixOS rebuild successful!"
+    echo "🌐 Restarting web services..."
+    sudo systemctl restart nginx
+    sudo systemctl restart phpfpm-www
+    echo "✅ Web services restarted!"
+    echo "🚀 PHP Version: $(php --version | head -1)"
+    echo "📍 Hosts file updated via NixOS configuration"
+    echo "🏗️  System State Version: 25.05"
+else
+    echo "❌ NixOS rebuild failed!"
+    exit 1
+fi
+EOF
+
+    sudo chmod +x /usr/local/bin/rebuild-webserver
+
+    # Database creation script
+    sudo tee /usr/local/bin/create-site-db > /dev/null << 'EOF'
+#!/usr/bin/env bash
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <database_name>"
+    exit 1
+fi
+
+DB_NAME=$1
+echo "Creating database: $DB_NAME"
+
+mysql -u root << SQL
+CREATE DATABASE IF NOT EXISTS \`$DB_NAME\`;
+GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO 'webuser'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+
+if [ $? -eq 0 ]; then
+    echo "✅ Database $DB_NAME created successfully!"
+else
+    echo "❌ Failed to create database $DB_NAME"
+    exit 1
+fi
+EOF
+
+    sudo chmod +x /usr/local/bin/create-site-db
+
+    # Site directory creation script with PHP 8.4 template and NixOS hosts management
+    sudo tee /usr/local/bin/create-site-dir > /dev/null << EOF
+#!/usr/bin/env bash
+if [ \$# -ne 2 ]; then
+    echo "Usage: \$0 <domain> <site_name>"
+    exit 1
+fi
+
+DOMAIN=\$1
+SITE_NAME=\$2
+SITE_DIR="$WEB_ROOT/\$DOMAIN"
+
+echo "Creating site directory: \$SITE_DIR"
+mkdir -p "\$SITE_DIR"
+
+# Create PHP 8.4 optimized index.php
+cat > "\$SITE_DIR/index.php" << PHP
+<?php
+// \$SITE_NAME - PHP 8.4 Ready
+echo '<h1>Welcome to \$SITE_NAME</h1>';
+echo '<p>This site is hosted on \$DOMAIN</p>';
+echo '<p>PHP Version: ' . PHP_VERSION . '</p>';
+echo '<p>Created: ' . date('Y-m-d H:i:s') . '</p>';
+
+if (version_compare(PHP_VERSION, '8.4.0', '>=')) {
+    echo '<h2>🚀 PHP 8.4 Features Available</h2>';
+    echo '<ul>';
+    echo '<li>Property hooks for cleaner object-oriented code</li>';
+    echo '<li>Asymmetric visibility modifiers</li>';
+    echo '<li>Enhanced performance and memory optimizations</li>';
+    echo '<li>New array and string manipulation functions</li>';
+    echo '<li>Improved type system and error handling</li>';
+    echo '</ul>';
+}
+?>
+PHP
+
+# Set proper ownership using separate commands
+chown -R nginx "\$SITE_DIR"
+chgrp -R nginx "\$SITE_DIR"
+chmod -R 755 "\$SITE_DIR"
+
+echo "✅ Site directory created successfully with PHP 8.4 template!"
+echo "📝 PHP 8.4 optimized index.php file created"
+echo "🔐 Permissions set correctly"
+echo ""
+echo "⚠️  To add \$DOMAIN to hosts file:"
+echo "   1. Edit $NIXOS_CONFIG_DIR/modules/services/networking.nix"
+echo "   2. Add \"\$DOMAIN\" to networking.hosts.\"127.0.0.1\" array"
+echo "   3. Run: sudo nixos-rebuild switch"
+EOF
+
+    sudo chmod +x /usr/local/bin/create-site-dir
+
+    # NixOS hosts management script
+    sudo tee /usr/local/bin/manage-nixos-hosts > /dev/null << EOF
+#!/usr/bin/env bash
+
+NETWORKING_CONFIG="$NIXOS_CONFIG_DIR/modules/services/networking.nix"
+
+show_help() {
+    echo "NixOS Hosts Management Script (Modular Configuration)"
+    echo "Usage: \$0 <command> [arguments]"
+    echo ""
+    echo "Commands:"
+    echo "  list                    - Show current local domains"
+    echo "  add <domain>           - Add domain to NixOS hosts configuration"
+    echo "  remove <domain>        - Remove domain from NixOS hosts configuration"
+    echo "  rebuild                - Rebuild NixOS configuration to apply changes"
+    echo "  show-current           - Show current active hosts file location"
+    echo ""
+    echo "Examples:"
+    echo "  \$0 add mysite.local"
+    echo "  \$0 remove oldsite.local"
+    echo "  \$0 list"
+}
+
+find_current_hosts() {
+    find /nix/store -maxdepth 1 -name "*-hosts" -type f 2>/dev/null | head -1
+}
+
+list_domains() {
+    echo "Current local domains in NixOS configuration:"
+    if [[ -f "\$NETWORKING_CONFIG" ]]; then
+        grep -A 10 'networking.hosts' "\$NETWORKING_CONFIG" | grep -E '^\s*".*\.local"' | sed 's/[",]//g' | sed 's/^[[:space:]]*/  /'
+    else
+        echo "  networking.nix not found"
+    fi
+    
+    echo ""
+    echo "Active hosts file location:"
+    local current_hosts=\$(find_current_hosts)
+    if [[ -n "\$current_hosts" ]]; then
+        echo "  \$current_hosts"
+        echo ""
+        echo "Active hosts entries:"
+        grep "127.0.0.1.*\.local" "\$current_hosts" 2>/dev/null | sed 's/^/  /' || echo "  No .local entries found"
+    else
+        echo "  No hosts file found in /nix/store"
+    fi
+}
+
+add_domain() {
+    local domain=\$1
+    if [[ -z "\$domain" ]]; then
+        echo "Error: Domain name required"
+        exit 1
+    fi
+    
+    if [[ ! -f "\$NETWORKING_CONFIG" ]]; then
+        echo "Error: networking.nix not found at \$NETWORKING_CONFIG"
+        exit 1
+    fi
+    
+    # Check if domain already exists
+    if grep -q "\"\$domain\"" "\$NETWORKING_CONFIG"; then
+        echo "Domain \$domain already exists in configuration"
+        exit 0
+    fi
+    
+    # Create backup
+    sudo cp "\$NETWORKING_CONFIG" "\$NETWORKING_CONFIG.backup.\$(date +%Y%m%d-%H%M%S)"
+    
+    # Add domain to the hosts configuration
+    sudo sed -i "/\"127.0.0.1\" = \[/a\\      \"\$domain\"" "\$NETWORKING_CONFIG"
+    
+    echo "✅ Added \$domain to NixOS hosts configuration"
+    echo "🔄 Run 'sudo nixos-rebuild switch' or '\$0 rebuild' to apply changes"
+}
+
+remove_domain() {
+    local domain=\$1
+    if [[ -z "\$domain" ]]; then
+        echo "Error: Domain name required"
+        exit 1
+    fi
+    
+    if [[ ! -f "\$NETWORKING_CONFIG" ]]; then
+        echo "Error: networking.nix not found at \$NETWORKING_CONFIG"
+        exit 1
+    fi
+    
+    # Check if domain exists
+    if ! grep -q "\"\$domain\"" "\$NETWORKING_CONFIG"; then
+        echo "Domain \$domain not found in configuration"
+        exit 0
+    fi
+    
+    # Create backup
+    sudo cp "\$NETWORKING_CONFIG" "\$NETWORKING_CONFIG.backup.\$(date +%Y%m%d-%H%M%S)"
+    
+    # Remove domain from configuration
+    sudo sed -i "/\"\$domain\"/d" "\$NETWORKING_CONFIG"
+    
+    echo "✅ Removed \$domain from NixOS hosts configuration"
+    echo "🔄 Run 'sudo nixos-rebuild switch' or '\$0 rebuild' to apply changes"
+}
+
+rebuild_config() {
+    echo "🔄 Rebuilding NixOS configuration..."
+    sudo nixos-rebuild switch
+    if [ \$? -eq 0 ]; then
+        echo "✅ NixOS rebuild successful!"
+        echo "📍 Hosts file updated"
+    else
+        echo "❌ NixOS rebuild failed!"
+        exit 1
+    fi
+}
+
+case "\$1" in
+    list)
+        list_domains
+        ;;
+    add)
+        add_domain "\$2"
+        ;;
+    remove)
+        remove_domain "\$2"
+        ;;
+    rebuild)
+        rebuild_config
+        ;;
+    show-current)
+        find_current_hosts
+        ;;
+    *)
+        show_help
+        exit 1
+        ;;
+esac
+EOF
+
+    sudo chmod +x /usr/local/bin/manage-nixos-hosts
+
+    success "Helper scripts created successfully with NixOS hosts management"
+}
+
+# Setup PHP error logging
+setup_php_logging() {
+    log "Setting up PHP 8.4 error logging..."
+    
+    sudo mkdir -p /var/log
+    sudo touch /var/log/php_errors.log
+    sudo chown nginx /var/log/php_errors.log
+    sudo chgrp nginx /var/log/php_errors.log
+    sudo chmod 644 /var/log/php_errors.log
+    
+    success "PHP error logging configured"
+}
+
+# Validate configuration syntax before proceeding
+validate_configuration() {
+    log "Validating NixOS configuration syntax..."
+    
+    if sudo nixos-rebuild dry-build >/dev/null 2>&1; then
+        success "Configuration syntax is valid"
+    else
+        error "Configuration syntax validation failed. Please check the configuration manually."
+    fi
+}
+
+# Main installation function
+main() {
+    echo -e "${CYAN}🚀 NixOS Web Server Installation Script (PHP 8.4)${NC}"
+    echo -e "${CYAN}Modular Configuration with System State Version 25.05${NC}"
+    echo -e "${CYAN}Handles NixOS hosts file management in /nix/store${NC}"
+    echo "=================================================="
+    echo
+    
+    # Parse command line arguments
+    parse_arguments "$@"
+    
+    # Interactive configuration if requested
+    if [[ "$INTERACTIVE_MODE" == "true" ]]; then
+        interactive_config
+    fi
+    
+    # Validate configuration
+    validate_config
+    
+    # Pre-flight checks
+    check_root
+    check_nixos
+    check_nixos_channel
+    
+    # Show current hosts file location
+    local current_hosts=$(find_nixos_hosts_file)
+    log "Current NixOS hosts file: $current_hosts"
+    
+    # Show configuration summary
+    echo -e "${CYAN}📋 Installation Configuration:${NC}"
+    echo "  NixOS Config: $NIXOS_CONFIG_DIR"
+    echo "  Backup Dir:   $BACKUP_DIR"
+    echo "  Web Root:     $WEB_ROOT"
+    echo "  System State: 25.05"
+    echo
+    
+    # Backup and analysis
+    backup_configuration
+    analyze_existing_config
+    
+    # Create modular configuration structure
+    create_service_modules
+    update_main_configuration
+    
+    # Validate configuration before proceeding
+    validate_configuration
+    
+    # Create nginx user/group before any file operations
+    create_nginx_user_group
+    
+    # Setup web content and services
+    setup_web_content
+    setup_phpmyadmin
+    setup_php_logging
+    
+    # Create helper scripts with NixOS hosts management
+    create_helper_scripts
+    
+    echo
+    echo -e "${GREEN}✅ Installation complete!${NC}"
+    echo
+    echo -e "${CYAN}🎯 Next steps:${NC}"
+    echo "1. Run: sudo nixos-rebuild switch"
+    echo "2. Wait for the system to rebuild and restart services"
+    echo "3. Access your sites:"
+    echo "   • Dashboard: http://dashboard.local"
+    echo "   • phpMyAdmin: http://phpmyadmin.local"
+    echo "   • Sample 1: http://sample1.local"
+    echo "   • Sample 2: http://sample2.local"
+    echo "   • Sample 3: http://sample3.local"
+    echo "   • Caching Scripts: http://caching-scripts.local"
+    echo
+    echo -e "${CYAN}🚀 PHP 8.4 Features Available:${NC}"
+    echo "   • Property hooks for cleaner object-oriented code"
+    echo "   • Asymmetric visibility modifiers"
+    echo "   • Enhanced performance with JIT improvements"
+    echo "   • New array functions and string manipulation"
+    echo "   • Improved type system and error handling"
+    echo
+    echo -e "${CYAN}🏗️  System Architecture:${NC}"
+    echo "   • Modular NixOS configuration with separate service modules"
+    echo "   • System State Version: 25.05"
+    echo "   • Service modules in: $NIXOS_CONFIG_DIR/modules/services/"
+    echo "   • Automatic service monitoring and health checks"
+    echo "   • Performance optimization and caching"
+    echo
+    echo -e "${CYAN}🔧 Helper commands:${NC}"
+    echo "   • rebuild-webserver - Rebuild NixOS and restart services"
+    echo "   • create-site-db <db_name> - Create new database"
+    echo "   • create-site-dir <domain> <site_name> - Create new site"
+    echo "   • manage-nixos-hosts <command> - Manage local domains in NixOS"
+    echo
+    echo -e "${CYAN}📍 NixOS Hosts Management:${NC}"
+    echo "   • manage-nixos-hosts list - Show current domains"
+    echo "   • manage-nixos-hosts add <domain> - Add domain"
+    echo "   • manage-nixos-hosts remove <domain> - Remove domain"
+    echo "   • manage-nixos-hosts rebuild - Apply changes"
+    echo
+    echo -e "${CYAN}📦 Configuration Details:${NC}"
+    echo "   • Main config: $NIXOS_CONFIG_DIR/configuration.nix"
+    echo "   • Service modules: $NIXOS_CONFIG_DIR/modules/services/"
+    echo "   • Web root: $WEB_ROOT"
+    echo "   • Backup location: $BACKUP_DIR"
+    echo "   • System state: 25.05"
+    echo
+    echo -e "${CYAN}🔄 To restore: bash $BACKUP_DIR/restore.sh${NC}"
+    echo
+    echo -e "${YELLOW}⚠️  Important: Hosts file management is now handled via NixOS configuration${NC}"
+    echo "   Local domains are managed through networking.hosts in modules/services/networking.nix"
+    echo "   Changes require 'sudo nixos-rebuild switch' to take effect"
+}
+
+# Run main function
+main "$@"
